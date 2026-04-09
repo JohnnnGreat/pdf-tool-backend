@@ -1,0 +1,40 @@
+# Core
+fastapi==0.115.12
+sqlalchemy==2.0.40
+email-validator==2.2.0
+uvicorn[standard]==0.34.0
+pydantic-settings==2.8.1
+python-dotenv==1.0.1
+python-multipart==0.0.20
+aiofiles==24.1.0
+
+# PDF Processing
+PyMuPDF==1.27.2.2
+pypdf==5.4.0
+reportlab==4.4.1
+pdf2image==1.17.0
+
+# Image Processing
+Pillow==11.1.0
+rembg==2.0.74
+
+# OCR
+pytesseract==0.3.13
+
+# Document Processing
+python-docx==1.1.2
+openpyxl==3.1.5
+python-pptx==1.0.2
+
+# Generators
+qrcode[pil]==8.1
+python-barcode==0.15.1
+
+# Security
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# Testing
+pytest==8.3.5
+httpx==0.28.1
+pytest-asyncio==0.25.3

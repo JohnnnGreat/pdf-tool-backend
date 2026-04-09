@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/Scripts/python -c \"import bcrypt; print\\(bcrypt.__version__\\)\")"
+    ]
+  }
+}
