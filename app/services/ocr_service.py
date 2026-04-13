@@ -12,6 +12,14 @@ def _get_tesseract():
     import pytesseract
     if settings.TESSERACT_PATH:
         pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_PATH
+    # Validate tesseract is actually available
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception:
+        raise HTTPException(
+            status_code=501,
+            detail="Tesseract OCR is not installed or not found. Set TESSERACT_PATH in your .env file."
+        )
     return pytesseract
 
 

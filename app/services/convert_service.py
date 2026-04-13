@@ -1,10 +1,7 @@
 """Format conversion service — PDF ↔ Word/Excel/PPT/Image/HTML/Markdown/CSV/Text."""
-import io
 import os
 import subprocess
-import zipfile
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -16,20 +13,37 @@ from app.core.config import settings
 # ---------------------------------------------------------------------------
 
 def _libreoffice_convert(input_path: str, output_dir: str, target_format: str) -> str:
-    lo = settings.LIBREOFFICE_PATH or "libreoffice"
+    lo = settings.LIBREOFFICE_PATH or "soffice"
+    if lo.startswith('"') and lo.endswith('"'):
+        lo = lo[1:-1]
+
+    # Map target formats to LibreOffice filter names if needed
+    convert_to = target_format
+    if target_format == "pptx":
+        # Sometimes 'impress_pptx_Export' is needed for PDF to PPTX conversion via Draw
+        convert_to = "pptx"
+
     result = subprocess.run(
-        [lo, "--headless", "--convert-to", target_format, "--outdir", output_dir, input_path],
+        [lo, "--headless", "--convert-to", convert_to, "--outdir", output_dir, input_path],
         capture_output=True,
         text=True,
         timeout=120,
     )
     if result.returncode != 0:
-        raise HTTPException(status_code=500, detail=f"LibreOffice conversion failed: {result.stderr}")
+        print(f"DEBUG: LO stdout: {result.stdout}")
+        print(f"DEBUG: LO stderr: {result.stderr}")
+        raise HTTPException(status_code=500, detail=f"LibreOffice conversion failed: {result.stderr or result.stdout}")
+
     stem = Path(input_path).stem
-    out_path = os.path.join(output_dir, f"{stem}.{target_format}")
-    if not os.path.exists(out_path):
-        raise HTTPException(status_code=500, detail="Conversion output not found")
-    return out_path
+    # Use glob to find the produced file as extension case/naming might vary
+    possible_files = [f for f in os.listdir(output_dir) if f.lower().startswith(stem.lower()) and f.lower().endswith(f".{target_format.lower()}")]
+
+    if not possible_files:
+        print(f"DEBUG: LO STDOUT: {result.stdout}")
+        print(f"DEBUG: Files in {output_dir}: {os.listdir(output_dir)}")
+        raise HTTPException(status_code=500, detail=f"Conversion output not found for {stem}.{target_format}")
+
+    return os.path.join(output_dir, possible_files[0])
 
 
 def word_to_pdf(input_path: str, output_dir: str) -> str:
@@ -45,17 +59,49 @@ def pptx_to_pdf(input_path: str, output_dir: str) -> str:
 
 
 def pdf_to_word(input_path: str, output_path: str) -> None:
-    """Extract PDF text into a .docx."""
-    import fitz
-    from docx import Document
+    """Convert PDF to Word via LibreOffice Draw PDF import for pixel-perfect layout."""
+    lo = settings.LIBREOFFICE_PATH or "soffice"
+    if lo.startswith('"') and lo.endswith('"'):
+        lo = lo[1:-1]
 
-    doc = fitz.open(input_path)
-    word = Document()
-    for page in doc:
-        word.add_paragraph(page.get_text())
-        word.add_page_break()
-    doc.close()
-    word.save(output_path)
+    output_dir = str(Path(output_path).parent)
+
+    # draw_pdf_import preserves exact element positions (text boxes, images, shapes)
+    # as anchored Draw objects — far more accurate than writer_pdf_import which
+    # tries to reflow content as paragraphs and scrambles the layout.
+    result = subprocess.run(
+        [
+            lo, "--headless",
+            "--infilter=draw_pdf_import",
+            "--convert-to", "docx",
+            "--outdir", output_dir,
+            input_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"LibreOffice conversion failed: {result.stderr or result.stdout}",
+        )
+
+    stem = Path(input_path).stem
+    possible = [
+        f for f in os.listdir(output_dir)
+        if f.lower().startswith(stem.lower()) and f.lower().endswith(".docx")
+    ]
+    if not possible:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion output not found for {stem}.docx",
+        )
+
+    lo_out = os.path.join(output_dir, possible[0])
+    if lo_out != output_path:
+        os.replace(lo_out, output_path)
 
 
 def pdf_to_excel(input_path: str, output_path: str) -> None:
@@ -76,7 +122,41 @@ def pdf_to_excel(input_path: str, output_path: str) -> None:
 
 
 def pdf_to_pptx(input_path: str, output_dir: str) -> str:
-    return _libreoffice_convert(input_path, output_dir, "pptx")
+    # Converting PDF to PPTX directly via LibreOffice CLI is unreliable.
+    # We use a visual-fidelity approach: PDF -> Images -> PPTX slides.
+    from pptx import Presentation
+    from pptx.util import Inches
+    import fitz
+
+    # 1. Convert PDF to images
+    doc = fitz.open(input_path)
+    prs = Presentation()
+
+    # Use first page size as slide size
+    if len(doc) > 0:
+        p = doc[0]
+        prs.slide_width = Inches(p.rect.width / 72)
+        prs.slide_height = Inches(p.rect.height / 72)
+
+    for i, page in enumerate(doc):
+        # Render page to image
+        pix = page.get_pixmap(dpi=150)
+        img_path = os.path.join(output_dir, f"temp_page_{i}.png")
+        pix.save(img_path)
+
+        # Create slide and add image
+        slide = prs.slides.add_slide(prs.slide_layouts[6]) # blank layout
+        slide.shapes.add_picture(img_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
+
+        # Cleanup temp image
+        if os.path.exists(img_path):
+            os.remove(img_path)
+
+    doc.close()
+    stem = Path(input_path).stem
+    out_path = os.path.join(output_dir, f"{stem}.pptx")
+    prs.save(out_path)
+    return out_path
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +178,27 @@ def pdf_to_images(input_path: str, output_dir: str, fmt: str = "png", dpi: int =
 
 
 def images_to_pdf(input_paths: list[str], output_path: str) -> None:
-    from PIL import Image
-    images = []
-    for p in input_paths:
-        img = Image.open(p).convert("RGB")
-        images.append(img)
-    if not images:
+    import fitz
+    if not input_paths:
         raise HTTPException(status_code=400, detail="No images provided")
-    images[0].save(output_path, save_all=True, append_images=images[1:])
+    doc = fitz.open()
+    for img_path in input_paths:
+        with open(img_path, "rb") as f:
+            img_bytes = f.read()
+        # Open image to get its dimensions
+        img_doc = fitz.open(stream=img_bytes, filetype="png" if img_path.endswith(".png") else "jpg")
+        if len(img_doc) > 0:
+            r = img_doc[0].rect
+            img_doc.close()
+        else:
+            img_doc.close()
+            from PIL import Image as PILImage
+            pil_img = PILImage.open(img_path)
+            r = fitz.Rect(0, 0, pil_img.width, pil_img.height)
+        page = doc.new_page(width=r.width, height=r.height)
+        page.insert_image(r, stream=img_bytes)
+    doc.save(output_path)
+    doc.close()
 
 
 # ---------------------------------------------------------------------------
@@ -113,32 +206,39 @@ def images_to_pdf(input_paths: list[str], output_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 def html_to_pdf(html_content: str, output_path: str) -> None:
+    # Use a unique stem for the temp file to avoid confusion in _libreoffice_convert
+    temp_stem = "source_html"
+    temp_html = os.path.join(os.path.dirname(output_path), f"{temp_stem}.html")
+    with open(temp_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
     try:
-        import weasyprint
-        weasyprint.HTML(string=html_content).write_pdf(output_path)
-    except ImportError:
-        raise HTTPException(status_code=501, detail="weasyprint not installed. Run: pip install weasyprint")
+        lo_out = _libreoffice_convert(temp_html, os.path.dirname(output_path), "pdf")
+        if os.path.exists(lo_out):
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            os.rename(lo_out, output_path)
+    finally:
+        if os.path.exists(temp_html):
+            os.remove(temp_html)
 
 
 def pdf_to_html(input_path: str, output_path: str) -> None:
-    import fitz
-    doc = fitz.open(input_path)
-    html_parts = ["<html><body>"]
-    for page in doc:
-        html_parts.append(f"<div class='page'><pre>{page.get_text()}</pre></div>")
-    html_parts.append("</body></html>")
-    doc.close()
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(html_parts))
+    # Use LibreOffice for better PDF-to-HTML conversion
+    lo_out = _libreoffice_convert(input_path, os.path.dirname(output_path), "html")
+    if lo_out != output_path and os.path.exists(lo_out):
+        os.replace(lo_out, output_path)
 
 
 def markdown_to_pdf(md_text: str, output_path: str) -> None:
-    try:
-        import markdown as md_lib
-        html = md_lib.markdown(md_text)
-        html_to_pdf(html, output_path)
-    except ImportError:
-        raise HTTPException(status_code=501, detail="markdown not installed. Run: pip install markdown weasyprint")
+    import markdown as md_lib
+    html = md_lib.markdown(md_text)
+    html_to_pdf(html, output_path)
+
+
+def svg_to_png(input_path: str, output_path: str) -> None:
+    lo_out = _libreoffice_convert(input_path, os.path.dirname(output_path), "png")
+    if lo_out != output_path and os.path.exists(lo_out):
+        os.replace(lo_out, output_path)
 
 
 def text_to_pdf(text: str, output_path: str, font_size: int = 12) -> None:
@@ -194,12 +294,6 @@ def excel_to_csv(input_path: str, output_path: str) -> None:
             writer.writerow([cell or "" for cell in row])
 
 
-def svg_to_png(input_path: str, output_path: str) -> None:
-    try:
-        import cairosvg
-        cairosvg.svg2png(url=input_path, write_to=output_path)
-    except ImportError:
-        raise HTTPException(status_code=501, detail="cairosvg not installed. Run: pip install cairosvg")
 
 
 def json_to_table(input_path: str, output_path: str, target: str = "csv") -> None:

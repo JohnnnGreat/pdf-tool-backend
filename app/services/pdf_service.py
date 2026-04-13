@@ -66,7 +66,15 @@ def split_pdf_ranges(input_path: str, output_dir: str, ranges: str) -> list[str]
 
 def compress_pdf(input_path: str, output_path: str) -> None:
     doc = fitz.open(input_path)
-    doc.save(output_path, garbage=4, deflate=True, clean=True)
+    doc.save(
+        output_path, 
+        garbage=4, 
+        deflate=True, 
+        deflate_images=True, 
+        deflate_fonts=True,
+        use_objstms=1,
+        clean=True
+    )
     doc.close()
 
 
@@ -150,13 +158,18 @@ def add_text_watermark(
     doc = fitz.open(input_path)
     for page in doc:
         rect = page.rect
+        # PyMuPDF insert_text 'rotate' parameter only supports multiples of 90.
+        # For arbitrary angles like 45, we use the 'morph' parameter (point, matrix).
+        center = fitz.Point(rect.width / 2, rect.height / 2)
+        # Matrix to rotate around the insertion point
+        matrix = fitz.Matrix(45)
         page.insert_text(
-            fitz.Point(rect.width / 4, rect.height / 2),
+            fitz.Point(rect.width * 0.1, rect.height * 0.6), # adjusted start point
             text,
             fontsize=font_size,
             color=(0.5, 0.5, 0.5),
-            rotate=45,
-            overlay=False,
+            morph=(fitz.Point(rect.width * 0.3, rect.height * 0.5), matrix),
+            overlay=True, # Overlay true for watermark
         )
     doc.save(output_path)
     doc.close()
