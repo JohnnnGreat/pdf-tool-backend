@@ -83,9 +83,10 @@ def _resolve_tier(raw: str | None) -> str:
     if not raw:
         return "free"
     clean = raw.strip().lower()
-    if clean in VALID_TIERS:          # exact: "starter", "pro", "enterprise"
+    if clean in VALID_TIERS:
         return clean
-    for tier in ("enterprise", "pro", "starter"):   # substring, most specific first
+    # substring, most specific first
+    for tier in ("enterprise", "business", "pro", "starter", "lite"):
         if tier in clean:
             return tier
     return "free"

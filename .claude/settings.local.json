@@ -23,7 +23,13 @@
       "Bash(pg_isready -h localhost -p 5432)",
       "PowerShell(cmd /c \"where psql 2>&1\")",
       "PowerShell(cmd /c \"where pg_isready 2>&1\")",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(python -c \"import socket; s=socket.socket\\(\\); s.settimeout\\(1\\); r=s.connect_ex\\(\\('localhost',5432\\)\\); s.close\\(\\); print\\('OPEN' if r==0 else 'CLOSED'\\)\")",
+      "Bash(venv/Scripts/python -c ' *)",
+      "Read(//c/Program Files/PostgreSQL/**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Bash(grep -v \"^$\")",
+      "Bash(timeout 10 venv/Scripts/python -c ' *)"
     ]
   }
 }

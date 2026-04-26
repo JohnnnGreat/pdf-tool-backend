@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
-    api_keys, auth, batch, convert, dashboard, document, editor,
+    ai, api_keys, auth, batch, billing, convert, dashboard, document, editor,
     generator, health, image, jobs, ocr, pdf, security, signature,
     utility, webhooks,
 )
@@ -9,7 +9,9 @@ from app.api.v1 import (
 router = APIRouter()
 
 router.include_router(auth.router)
+router.include_router(ai.router)
 router.include_router(api_keys.router)
+router.include_router(billing.router)
 router.include_router(dashboard.router)
 router.include_router(jobs.router)
 router.include_router(webhooks.router)

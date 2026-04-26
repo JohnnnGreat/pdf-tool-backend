@@ -21,9 +21,17 @@ class Settings(BaseSettings):
 
     # Payment providers
     PAYSTACK_SECRET_KEY: str = ""           # sk_live_xxx  (from Paystack dashboard)
-    FLUTTERWAVE_SECRET_HASH: str = ""       # static hash you set in FW dashboard
+    FLUTTERWAVE_SECRET_KEY: str = ""        # FLWSECK_xxx  (from Flutterwave dashboard)
+    FLUTTERWAVE_SECRET_HASH: str = ""       # static hash you set in FW webhook settings
     LEMONSQUEEZY_WEBHOOK_SECRET: str = ""   # from LS Settings → Webhooks
     COINBASE_WEBHOOK_SECRET: str = ""       # from Coinbase Commerce → Settings → Webhooks
+
+    # Payment callback (frontend URL — where provider redirects after payment)
+    PAYMENT_CALLBACK_URL: str = "http://localhost:3000/dashboard/upgrade/success"
+
+    # AI providers
+    GEMINI_API_KEY: str = ""    # from Google AI Studio (aistudio.google.com)
+    GROQ_API_KEY: str   = ""    # from console.groq.com
 
     # CORS
     ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
