@@ -19,4 +19,5 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan", lazy="noload")
+    api_keys = relationship("APIKey",         back_populates="user", cascade="all, delete-orphan", lazy="noload")
+    jobs     = relationship("ProcessingJob",  back_populates="user", cascade="all, delete-orphan", lazy="noload")

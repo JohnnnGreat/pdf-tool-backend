@@ -4,7 +4,26 @@
       "Bash(python -m venv venv)",
       "Bash(venv/Scripts/pip install:*)",
       "Bash(curl -s http://localhost:5000/api/v1/health)",
-      "Bash(curl -s http://localhost:8000/api/v1/health)"
+      "Bash(curl -s http://localhost:8000/api/v1/health)",
+      "Read(//c/Users/user/John/pdf-tool-frontend/**)",
+      "Read(//c/Users/user/John/**)",
+      "Bash(cmd /c \"cd C:\\\\Users\\\\user\\\\John\\\\pdf-tool-frontend && npx tsc --noEmit 2>&1\")",
+      "Bash(cmd *)",
+      "Bash(node \"C:/Users/user/John/pdf-tool-frontend/node_modules/typescript/bin/tsc\" --noEmit -p \"C:/Users/user/John/pdf-tool-frontend/tsconfig.json\")",
+      "Bash(xargs grep *)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(curl -s http://localhost:8000/api/v1/auth/login)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"test@docforge.dev\",\"username\":\"testuser\",\"full_name\":\"Test User\",\"password\":\"Test1234!\",\"confirm_password\":\"Test1234!\"}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"test@docforge.dev\",\"password\":\"Test1234!\"}')",
+      "Bash(curl -s http://localhost:8000/api/v1/auth/me -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzIiwidHlwZSI6ImFjY2VzcyIsImV4cCI6MTc3NzIwNDg1OH0.oHasPTI1ppNCTFKkYFLtaqQBaH58FSaiUb7xZPlmg48')",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"test@docforge.dev\",\"password\":\"wrongpassword\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"nobody@docforge.dev\",\"password\":\"Test1234!\"}')",
+      "Bash(xargs ls *)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "PowerShell(cmd /c \"where psql 2>&1\")",
+      "PowerShell(cmd /c \"where pg_isready 2>&1\")",
+      "Bash(python3 *)"
     ]
   }
 }
