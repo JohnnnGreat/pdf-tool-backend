@@ -1,4 +1,5 @@
 """Format conversion service — PDF ↔ Word/Excel/PPT/Image/HTML/Markdown/CSV/Text."""
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -7,21 +8,27 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
+
+def _resolve_libreoffice_path() -> str:
+    raw = settings.LIBREOFFICE_PATH or "soffice"
+    raw = raw.strip().strip('"')
+    if raw == "soffice":
+        return raw
+    resolved = Path(raw).resolve()
+    if not resolved.exists():
+        raise HTTPException(status_code=500, detail=f"LibreOffice binary not found at '{resolved}'")
+    return str(resolved)
+
 
 # ---------------------------------------------------------------------------
 # PDF ↔ Office (LibreOffice headless)
 # ---------------------------------------------------------------------------
 
 def _libreoffice_convert(input_path: str, output_dir: str, target_format: str) -> str:
-    lo = settings.LIBREOFFICE_PATH or "soffice"
-    if lo.startswith('"') and lo.endswith('"'):
-        lo = lo[1:-1]
-
-    # Map target formats to LibreOffice filter names if needed
+    lo = _resolve_libreoffice_path()
     convert_to = target_format
-    if target_format == "pptx":
-        # Sometimes 'impress_pptx_Export' is needed for PDF to PPTX conversion via Draw
-        convert_to = "pptx"
 
     result = subprocess.run(
         [lo, "--headless", "--convert-to", convert_to, "--outdir", output_dir, input_path],
@@ -30,17 +37,18 @@ def _libreoffice_convert(input_path: str, output_dir: str, target_format: str) -
         timeout=120,
     )
     if result.returncode != 0:
-        print(f"DEBUG: LO stdout: {result.stdout}")
-        print(f"DEBUG: LO stderr: {result.stderr}")
+        logger.debug("LO stdout: %s", result.stdout)
+        logger.debug("LO stderr: %s", result.stderr)
         raise HTTPException(status_code=500, detail=f"LibreOffice conversion failed: {result.stderr or result.stdout}")
 
     stem = Path(input_path).stem
-    # Use glob to find the produced file as extension case/naming might vary
-    possible_files = [f for f in os.listdir(output_dir) if f.lower().startswith(stem.lower()) and f.lower().endswith(f".{target_format.lower()}")]
+    possible_files = [
+        f for f in os.listdir(output_dir)
+        if f.lower().startswith(stem.lower()) and f.lower().endswith(f".{target_format.lower()}")
+    ]
 
     if not possible_files:
-        print(f"DEBUG: LO STDOUT: {result.stdout}")
-        print(f"DEBUG: Files in {output_dir}: {os.listdir(output_dir)}")
+        logger.debug("LO stdout: %s | files in %s: %s", result.stdout, output_dir, os.listdir(output_dir))
         raise HTTPException(status_code=500, detail=f"Conversion output not found for {stem}.{target_format}")
 
     return os.path.join(output_dir, possible_files[0])
@@ -66,13 +74,13 @@ def pdf_to_word(input_path: str, output_path: str) -> None:
 
     output_dir = str(Path(output_path).parent)
 
-    # draw_pdf_import preserves exact element positions (text boxes, images, shapes)
-    # as anchored Draw objects — far more accurate than writer_pdf_import which
-    # tries to reflow content as paragraphs and scrambles the layout.
+    # writer_pdf_import imports the PDF into LibreOffice Writer so it can be
+    # exported to docx. draw_pdf_import would import as a Draw document which
+    # has no docx export filter and causes "no export filter" errors.
     result = subprocess.run(
         [
             lo, "--headless",
-            "--infilter=draw_pdf_import",
+            "--infilter=writer_pdf_import",
             "--convert-to", "docx",
             "--outdir", output_dir,
             input_path,

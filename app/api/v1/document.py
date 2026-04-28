@@ -1,7 +1,7 @@
 """Document tools router — 16 endpoints (Word, Excel, PowerPoint)."""
 import json
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import document_service
@@ -11,7 +11,9 @@ from app.utils.file_handler import (
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/document", tags=["Document Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/document", tags=["Document Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):
@@ -33,11 +35,11 @@ PPTX_MT = "application/vnd.openxmlformats-officedocument.presentationml.presenta
 # ---------------------------------------------------------------------------
 
 @router.post("/create-docx")
-async def create_docx(request: Request, data_json: str = Form(...)):
+async def create_docx(request: Request):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
-        data = json.loads(data_json)
+        data = await request.json()
         output_path = f"{out}/document.docx"
         document_service.create_docx(data, output_path)
         return _file_response(read_file(output_path), "document.docx", DOCX_MT)

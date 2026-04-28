@@ -1,4 +1,7 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_INSECURE_DEFAULTS = {"change-me-in-production", "change-me-webhook-secret", "CHANGE_ME_TO_A_RANDOM_64_CHAR_HEX_STRING"}
 
 
 class Settings(BaseSettings):
@@ -8,6 +11,18 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     SECRET_KEY: str = "change-me-in-production"
     PORT: int = 8000
+
+    @model_validator(mode="after")
+    def _validate_secrets(self) -> "Settings":
+        if not self.DEBUG:
+            if self.SECRET_KEY in _INSECURE_DEFAULTS or len(self.SECRET_KEY) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be a random string of at least 32 characters in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+            if self.WEBHOOK_SECRET in _INSECURE_DEFAULTS:
+                raise ValueError("WEBHOOK_SECRET must be changed from its default value in production.")
+        return self
 
     # Database
     DATABASE_URL: str = "sqlite:///./docforge.db"
@@ -44,6 +59,7 @@ class Settings(BaseSettings):
     # Paths
     UPLOAD_DIR: str = "./uploads"
     OUTPUT_DIR: str = "./outputs"
+    RESULTS_DIR: str = "./results"
 
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 30
@@ -55,6 +71,18 @@ class Settings(BaseSettings):
 
     # LibreOffice
     LIBREOFFICE_PATH: str = ""
+
+    # Email (SMTP)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@docforge.com"
+    SMTP_FROM_NAME: str = "DocForge"
+    SMTP_TLS: bool = True
+
+    # Frontend URL (used in email links)
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Redis (optional)
     REDIS_URL: str = ""

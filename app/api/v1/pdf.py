@@ -1,17 +1,42 @@
 """PDF tools router — 22 endpoints."""
 import json
+import re
 from typing import Annotated, Optional
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import pdf_service
 from app.utils.file_handler import (
-    ALLOWED_PDF, cleanup, make_job_dirs, make_zip, read_file, save_bytes, validate_file_type, read_upload
+    ALLOWED_PDF, cleanup, make_job_dirs, make_zip, output_name, read_file, save_bytes,
+    validate_file_type, read_upload,
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/pdf", tags=["PDF Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/pdf", tags=["PDF Tools"], dependencies=[Depends(plan_guard)])
+
+_RANGE_RE = re.compile(r"^\d+(-\d+)?(,\d+(-\d+)?)*$")
+
+
+def _validate_ranges(ranges: str) -> None:
+    """Validate page range string like '1-3,5,7-9' before it reaches the service."""
+    cleaned = ranges.strip().replace(" ", "")
+    if not _RANGE_RE.match(cleaned):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid page range format. Use comma-separated ranges like '1-3,5,7-9'.",
+        )
+    for part in cleaned.split(","):
+        if "-" in part:
+            start, end = part.split("-", 1)
+            if int(start) >= int(end):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid range '{part}': start page must be less than end page.",
+                )
 
 
 def _rl(request: Request):
@@ -37,8 +62,9 @@ async def merge(request: Request, files: list[UploadFile] = File(...)):
         output_path = f"{out}/merged.pdf"
         pdf_service.merge_pdfs(paths, output_path)
         data = read_file(output_path)
+        dl_name = output_name(files[0].filename, "merged", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="merged.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -55,8 +81,9 @@ async def split(request: Request, file: UploadFile = File(...)):
         zip_path = f"{up}/pages.zip"
         make_zip(pages, zip_path)
         data = read_file(zip_path)
+        dl_name = output_name(file.filename, "pages", "zip")
         return Response(content=data, media_type="application/zip",
-                        headers={"Content-Disposition": 'attachment; filename="pages.zip"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -65,6 +92,7 @@ async def split(request: Request, file: UploadFile = File(...)):
 async def split_range(request: Request, file: UploadFile = File(...), ranges: str = Form(...)):
     _rl(request)
     validate_file_type(file, ALLOWED_PDF)
+    _validate_ranges(ranges)
     _, up, out = make_job_dirs()
     try:
         content = await read_upload(file)
@@ -73,8 +101,9 @@ async def split_range(request: Request, file: UploadFile = File(...), ranges: st
         zip_path = f"{up}/ranges.zip"
         make_zip(pages, zip_path)
         data = read_file(zip_path)
+        dl_name = output_name(file.filename, "ranges", "zip")
         return Response(content=data, media_type="application/zip",
-                        headers={"Content-Disposition": 'attachment; filename="ranges.zip"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -84,18 +113,21 @@ async def split_range(request: Request, file: UploadFile = File(...), ranges: st
 # ---------------------------------------------------------------------------
 
 @router.post("/compress")
-async def compress(request: Request, file: UploadFile = File(...)):
+async def compress(request: Request, file: UploadFile = File(...), quality: str = Form("medium")):
     _rl(request)
     validate_file_type(file, ALLOWED_PDF)
+    if quality not in ("low", "medium", "high"):
+        raise HTTPException(status_code=422, detail="quality must be low, medium, or high")
     _, up, out = make_job_dirs()
     try:
         content = await read_upload(file)
         input_path = save_bytes(content, up, "input.pdf")
         output_path = f"{out}/compressed.pdf"
-        pdf_service.compress_pdf(input_path, output_path)
+        pdf_service.compress_pdf(input_path, output_path, quality)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "compressed", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="compressed.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -113,8 +145,9 @@ async def rotate(request: Request, file: UploadFile = File(...), angle: int = Fo
         output_path = f"{out}/rotated.pdf"
         pdf_service.rotate_pdf(input_path, output_path, angle, pages)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "rotated", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="rotated.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -130,8 +163,9 @@ async def delete_pages(request: Request, file: UploadFile = File(...), page_numb
         output_path = f"{out}/output.pdf"
         pdf_service.delete_pages(input_path, output_path, page_numbers)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "edited", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="output.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -147,8 +181,9 @@ async def reorder(request: Request, file: UploadFile = File(...), order: str = F
         output_path = f"{out}/reordered.pdf"
         pdf_service.reorder_pages(input_path, output_path, order)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "reordered", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="reordered.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -164,8 +199,9 @@ async def extract_pages(request: Request, file: UploadFile = File(...), page_num
         output_path = f"{out}/extracted.pdf"
         pdf_service.extract_pages(input_path, output_path, page_numbers)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "extracted", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="extracted.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -184,8 +220,9 @@ async def page_numbers(
         output_path = f"{out}/numbered.pdf"
         pdf_service.add_page_numbers(input_path, output_path, position, font_size, start_number)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "numbered", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="numbered.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -204,8 +241,9 @@ async def watermark(
         output_path = f"{out}/watermarked.pdf"
         pdf_service.add_text_watermark(input_path, output_path, text, opacity, font_size)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "watermarked", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="watermarked.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -224,8 +262,9 @@ async def header_footer(
         output_path = f"{out}/output.pdf"
         pdf_service.add_header_footer(input_path, output_path, header, footer, font_size)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "header-footer", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="output.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -244,8 +283,9 @@ async def crop(
         output_path = f"{out}/cropped.pdf"
         pdf_service.crop_pdf(input_path, output_path, x, y, width, height)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "cropped", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="cropped.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -261,8 +301,9 @@ async def flatten(request: Request, file: UploadFile = File(...)):
         output_path = f"{out}/flattened.pdf"
         pdf_service.flatten_pdf(input_path, output_path)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "flattened", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="flattened.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -278,8 +319,9 @@ async def repair(request: Request, file: UploadFile = File(...)):
         output_path = f"{out}/repaired.pdf"
         pdf_service.repair_pdf(input_path, output_path)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "repaired", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="repaired.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -297,8 +339,9 @@ async def metadata(request: Request, file: UploadFile = File(...), update: Optio
             output_path = f"{out}/output.pdf"
             pdf_service.set_metadata(input_path, output_path, meta_dict)
             data = read_file(output_path)
+            dl_name = output_name(file.filename, "metadata", "pdf")
             return Response(content=data, media_type="application/pdf",
-                            headers={"Content-Disposition": 'attachment; filename="output.pdf"'})
+                            headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
         return pdf_service.get_pdf_info(input_path)
     finally:
         cleanup(up, out)
@@ -316,8 +359,9 @@ async def redact(request: Request, file: UploadFile = File(...), patterns: str =
         output_path = f"{out}/redacted.pdf"
         pdf_service.redact_text(input_path, output_path, pattern_list)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "redacted", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="redacted.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -349,8 +393,9 @@ async def pdf_to_pdfa(request: Request, file: UploadFile = File(...)):
         output_path = f"{out}/pdfa.pdf"
         pdf_service.convert_to_pdfa(input_path, output_path)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "pdfa", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="pdfa.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -367,8 +412,9 @@ async def bookmarks(request: Request, file: UploadFile = File(...), bookmarks_js
         output_path = f"{out}/bookmarked.pdf"
         pdf_service.add_bookmarks(input_path, output_path, bm_list)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "bookmarked", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="bookmarked.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -387,8 +433,9 @@ async def overlay(request: Request, base: UploadFile = File(...), overlay_file: 
         output_path = f"{out}/overlaid.pdf"
         pdf_service.overlay_pdfs(base_path, overlay_path, output_path)
         data = read_file(output_path)
+        dl_name = output_name(base.filename, "overlaid", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="overlaid.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 
@@ -405,8 +452,9 @@ async def fill_form(request: Request, file: UploadFile = File(...), fields_json:
         output_path = f"{out}/filled.pdf"
         pdf_service.fill_form(input_path, output_path, field_values)
         data = read_file(output_path)
+        dl_name = output_name(file.filename, "filled", "pdf")
         return Response(content=data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="filled.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'})
     finally:
         cleanup(up, out)
 

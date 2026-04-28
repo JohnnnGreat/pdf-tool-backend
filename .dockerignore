@@ -1,0 +1,64 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment files — never bake secrets into the image
+.env
+.env.prod
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Docker files (not needed inside image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Nginx config (mounted as volume)
+nginx/
+
+# Scripts (entrypoints are COPY'd explicitly)
+# scripts/   <-- intentionally NOT ignored so entrypoints can be copied
+
+# Dev/scratch files
+scratch/
+test.pdf
+test_tools.py
+
+# SQLite dev database
+*.db
+
+# Uploaded/output files (runtime data, not source)
+uploads/
+outputs/
+
+# Docs
+README.md
+BACKEND.md

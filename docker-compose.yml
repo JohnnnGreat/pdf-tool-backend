@@ -1,0 +1,93 @@
+# =============================================================================
+# DEVELOPMENT — docker-compose.yml
+#
+# Usage:
+#   docker compose up --build          # first run
+#   docker compose up                  # subsequent runs
+#   docker compose down -v             # stop and remove volumes
+#
+# The entire project directory is bind-mounted so every file save triggers
+# uvicorn hot reload. PostgreSQL and Redis run as sibling containers.
+# =============================================================================
+
+name: docforge-dev
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # FastAPI application (development mode — hot reload)
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: docforge-app-dev
+    volumes:
+      # Bind-mount source so changes reload instantly
+      - .:/app
+      # Keep uploads/outputs as named volumes so they persist across restarts
+      - uploads_data:/app/uploads
+      - outputs_data:/app/outputs
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override DB/Redis to point at the compose services
+      DATABASE_URL: postgresql://docforge:docforge@db:5432/docforge
+      REDIS_URL: redis://redis:6379/0
+      # System tool paths inside the container
+      TESSERACT_PATH: /usr/bin/tesseract
+      LIBREOFFICE_PATH: /usr/bin/libreoffice
+      # Storage directories inside the container
+      UPLOAD_DIR: /app/uploads
+      OUTPUT_DIR: /app/outputs
+      DEBUG: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: docforge-db-dev
+    environment:
+      POSTGRES_USER: docforge
+      POSTGRES_PASSWORD: docforge
+      POSTGRES_DB: docforge
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Exposed so you can connect from a local DB GUI (e.g. TablePlus, DBeaver)
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docforge -d docforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 (used for rate limiting and caching when REDIS_URL is set)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: docforge-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+  outputs_data:

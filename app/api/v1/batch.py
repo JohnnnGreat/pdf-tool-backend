@@ -1,5 +1,5 @@
 """Batch processing router — 4 endpoints."""
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import batch_service
@@ -8,7 +8,9 @@ from app.utils.file_handler import (
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/batch", tags=["Batch Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/batch", tags=["Batch Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):

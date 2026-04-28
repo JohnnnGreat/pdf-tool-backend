@@ -15,6 +15,7 @@ class JobCreate(BaseModel):
     file_size_bytes:   int = 0
     output_size_bytes: int | None = None
     status:            JobStatus = "success"
+    share_token:       str | None = None
 
 
 class JobResponse(BaseModel):
@@ -27,5 +28,7 @@ class JobResponse(BaseModel):
     output_size_bytes: int | None
     status:            str
     created_at:        datetime
+    share_token:       str | None = None
+    result_expires_at: datetime | None = None
 
     model_config = {"from_attributes": True}

@@ -29,7 +29,15 @@
       "Read(//c/Program Files/PostgreSQL/**)",
       "Read(//c/Program Files \\(x86\\)/**)",
       "Bash(grep -v \"^$\")",
-      "Bash(timeout 10 venv/Scripts/python -c ' *)"
+      "Bash(timeout 10 venv/Scripts/python -c ' *)",
+      "Bash(/c/Users/user/John/pdf-tool-backend/venv/Scripts/pip install *)",
+      "Bash(/c/Users/user/John/pdf-tool-backend/venv/Scripts/alembic init *)",
+      "Bash(/c/Users/user/John/pdf-tool-backend/venv/Scripts/alembic revision *)",
+      "Bash(/c/Users/user/John/pdf-tool-backend/venv/Scripts/python *)",
+      "Bash(/c/Users/user/John/pdf-tool-backend/venv/Scripts/alembic upgrade *)",
+      "Bash(python -)",
+      "Bash(python -c ' *)",
+      "Bash(docker compose *)"
     ]
   }
 }

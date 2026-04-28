@@ -37,3 +37,11 @@ def decode_access_token(token: str) -> dict | None:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
+
+
+def create_totp_temp_token(user_id: int) -> str:
+    """Short-lived (5 min) token issued after password auth when 2FA is required."""
+    return create_access_token(
+        {"sub": str(user_id), "type": "2fa"},
+        expires_delta=timedelta(minutes=5),
+    )

@@ -2,17 +2,19 @@
 import json
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import image_service
 from app.utils.file_handler import (
-    ALLOWED_IMAGES, cleanup, make_job_dirs, make_zip, read_file, save_bytes,
+    ALLOWED_IMAGES, cleanup, make_job_dirs, make_zip, output_name, read_file, save_bytes,
     validate_file_type, read_upload,
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/image", tags=["Image Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/image", tags=["Image Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):
@@ -37,14 +39,15 @@ async def compress_image(request: Request, file: UploadFile = File(...), quality
         output_path = f"{out}/compressed.{ext}"
         image_service.compress_image(input_path, output_path, quality)
         data = read_file(output_path)
-        return _img_response(data, f"compressed.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "compressed", ext), ext)
     finally:
         cleanup(up, out)
 
 
 @router.post("/resize")
 async def resize_image(request: Request, file: UploadFile = File(...),
-                       width: Optional[int] = Form(None), height: Optional[int] = Form(None),
+                       width: Optional[int] = Form(None, ge=1, le=10000),
+                       height: Optional[int] = Form(None, ge=1, le=10000),
                        maintain_ratio: bool = Form(True)):
     _rl(request)
     validate_file_type(file, ALLOWED_IMAGES)
@@ -56,15 +59,17 @@ async def resize_image(request: Request, file: UploadFile = File(...),
         output_path = f"{out}/resized.{ext}"
         image_service.resize_image(input_path, output_path, width, height, maintain_ratio)
         data = read_file(output_path)
-        return _img_response(data, f"resized.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "resized", ext), ext)
     finally:
         cleanup(up, out)
 
 
 @router.post("/crop")
 async def crop_image(request: Request, file: UploadFile = File(...),
-                     x: int = Form(...), y: int = Form(...),
-                     width: int = Form(...), height: int = Form(...)):
+                     x: int = Form(..., ge=0, le=50000),
+                     y: int = Form(..., ge=0, le=50000),
+                     width: int = Form(..., ge=1, le=10000),
+                     height: int = Form(..., ge=1, le=10000)):
     _rl(request)
     validate_file_type(file, ALLOWED_IMAGES)
     _, up, out = make_job_dirs()
@@ -75,7 +80,7 @@ async def crop_image(request: Request, file: UploadFile = File(...),
         output_path = f"{out}/cropped.{ext}"
         image_service.crop_image(input_path, output_path, x, y, width, height)
         data = read_file(output_path)
-        return _img_response(data, f"cropped.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "cropped", ext), ext)
     finally:
         cleanup(up, out)
 
@@ -93,7 +98,7 @@ async def rotate_image(request: Request, file: UploadFile = File(...),
         output_path = f"{out}/rotated.{ext}"
         image_service.rotate_image(input_path, output_path, angle, flip)
         data = read_file(output_path)
-        return _img_response(data, f"rotated.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "rotated", ext), ext)
     finally:
         cleanup(up, out)
 
@@ -111,7 +116,7 @@ async def convert_image(request: Request, file: UploadFile = File(...), target_f
         output_path = f"{out}/output.{out_ext}"
         image_service.convert_image_format(input_path, output_path, target_format)
         data = read_file(output_path)
-        return _img_response(data, f"output.{out_ext}", out_ext)
+        return _img_response(data, output_name(file.filename, "converted", out_ext), out_ext)
     finally:
         cleanup(up, out)
 
@@ -127,7 +132,7 @@ async def remove_bg(request: Request, file: UploadFile = File(...)):
         output_path = f"{out}/no_bg.png"
         image_service.remove_background(input_path, output_path)
         data = read_file(output_path)
-        return _img_response(data, "no_bg.png", "png")
+        return _img_response(data, output_name(file.filename, "no-bg", "png"), "png")
     finally:
         cleanup(up, out)
 
@@ -145,7 +150,7 @@ async def image_watermark(request: Request, file: UploadFile = File(...),
         output_path = f"{out}/watermarked.{ext}"
         image_service.add_image_watermark_text(input_path, output_path, text, opacity)
         data = read_file(output_path)
-        return _img_response(data, f"watermarked.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "watermarked", ext), ext)
     finally:
         cleanup(up, out)
 
@@ -204,14 +209,15 @@ async def exif_remover(request: Request, file: UploadFile = File(...)):
         output_path = f"{out}/clean.{ext}"
         image_service.remove_exif(input_path, output_path)
         data = read_file(output_path)
-        return _img_response(data, f"clean.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "clean", ext), ext)
     finally:
         cleanup(up, out)
 
 
 @router.post("/bulk-resize")
 async def bulk_resize(request: Request, files: list[UploadFile] = File(...),
-                      width: int = Form(...), height: int = Form(...)):
+                      width: int = Form(..., ge=1, le=10000),
+                      height: int = Form(..., ge=1, le=10000)):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
@@ -257,6 +263,6 @@ async def image_filter(request: Request, file: UploadFile = File(...), filter_na
         output_path = f"{out}/filtered.{ext}"
         image_service.apply_filter(input_path, output_path, filter_name)
         data = read_file(output_path)
-        return _img_response(data, f"filtered.{ext}", ext)
+        return _img_response(data, output_name(file.filename, "filtered", ext), ext)
     finally:
         cleanup(up, out)

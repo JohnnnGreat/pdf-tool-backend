@@ -1,8 +1,9 @@
 """Conversion tools router — 18 endpoints."""
 import json
 from typing import Optional
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import convert_service
@@ -12,26 +13,35 @@ from app.utils.file_handler import (
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/convert", tags=["Conversion Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/convert", tags=["Conversion Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):
     rate_limiter.check(get_client_ip(request))
 
 
+def _content_disposition(filename: str) -> str:
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii")
+    if ascii_name == filename:
+        return f'attachment; filename="{filename}"'
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+
+
 def _pdf_response(data: bytes, filename: str) -> Response:
     return Response(content=data, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+                    headers={"Content-Disposition": _content_disposition(filename)})
 
 
 def _zip_response(data: bytes, filename: str) -> Response:
     return Response(content=data, media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+                    headers={"Content-Disposition": _content_disposition(filename)})
 
 
 def _file_response(data: bytes, filename: str, media_type: str) -> Response:
     return Response(content=data, media_type=media_type,
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+                    headers={"Content-Disposition": _content_disposition(filename)})
 
 
 @router.post("/pdf-to-word")

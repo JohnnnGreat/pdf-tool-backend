@@ -19,5 +19,21 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    api_keys = relationship("APIKey",         back_populates="user", cascade="all, delete-orphan", lazy="noload")
-    jobs     = relationship("ProcessingJob",  back_populates="user", cascade="all, delete-orphan", lazy="noload")
+    # Email verification
+    verification_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    verification_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Password reset
+    reset_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    reset_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Monthly tool-usage quota (for frontend JWT users)
+    monthly_operations: Mapped[int] = mapped_column(Integer, default=0)
+    ops_reset_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Two-factor authentication (TOTP)
+    totp_secret:  Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool]       = mapped_column(Boolean, default=False)
+
+    api_keys = relationship("APIKey",        back_populates="user", cascade="all, delete-orphan", lazy="select")
+    jobs     = relationship("ProcessingJob", back_populates="user", cascade="all, delete-orphan", lazy="select")

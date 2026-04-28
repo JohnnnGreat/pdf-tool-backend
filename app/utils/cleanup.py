@@ -14,7 +14,7 @@ def cleanup_old_jobs() -> None:
     retention_secs = settings.TEMP_FILE_RETENTION_MINUTES * 60
     cutoff = time.time() - retention_secs
 
-    for base_dir in [settings.OUTPUT_DIR, settings.UPLOAD_DIR]:
+    for base_dir in [settings.OUTPUT_DIR, settings.UPLOAD_DIR, settings.RESULTS_DIR]:
         if not os.path.exists(base_dir):
             continue
         for job_dir in Path(base_dir).iterdir():

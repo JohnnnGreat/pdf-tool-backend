@@ -3,7 +3,7 @@ import difflib
 import zipfile
 import io
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
 
 from app.utils.file_handler import (
@@ -11,7 +11,9 @@ from app.utils.file_handler import (
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/utility", tags=["Utility Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/utility", tags=["Utility Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):

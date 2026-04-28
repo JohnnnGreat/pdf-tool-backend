@@ -25,6 +25,7 @@ def record_job(
         file_size_bytes=data.file_size_bytes,
         output_size_bytes=data.output_size_bytes,
         status=data.status,
+        share_token=data.share_token,
     )
     db.add(job)
     db.commit()

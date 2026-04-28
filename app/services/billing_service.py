@@ -99,6 +99,7 @@ TIER_ORDER = ["free", "lite", "starter", "pro", "business", "enterprise"]
 
 class BillingService:
     def __init__(self, db: Session) -> None:
+        self.db   = db
         self.repo = APIKeyRepository(db)
 
     # ------------------------------------------------------------------ #
@@ -127,11 +128,13 @@ class BillingService:
     # ------------------------------------------------------------------ #
 
     def get_current_plan(self, user: User) -> CurrentPlanResponse:
+        from datetime import datetime, timezone
+        from app.repositories.user_repository import UserRepository
+
         keys = self.repo.get_by_user(user.id)
         active = [k for k in keys if k.is_active]
 
         tier = "free"
-        monthly_used = 0
         billing_period = "monthly"
         if active:
             best = max(
@@ -139,8 +142,16 @@ class BillingService:
                 key=lambda k: TIER_ORDER.index(k.tier) if k.tier in TIER_ORDER else 0,
             )
             tier = best.tier
-            monthly_used = best.monthly_requests
             billing_period = getattr(best, "billing_period", "monthly") or "monthly"
+
+        # monthly_used comes from the user's tool-usage counter, not API key requests
+        # Reset it if a new calendar month has started
+        now = datetime.now(timezone.utc)
+        reset_at = user.ops_reset_at
+        reset_aware = reset_at.replace(tzinfo=timezone.utc) if reset_at.tzinfo is None else reset_at
+        if now.year != reset_aware.year or now.month != reset_aware.month:
+            UserRepository(self.db).update(user, monthly_operations=0, ops_reset_at=now)
+            user.monthly_operations = 0
 
         limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
         meta   = PLAN_META.get(tier, PLAN_META["free"])
@@ -149,7 +160,7 @@ class BillingService:
             name=meta["name"],
             price_monthly=limits["price_monthly"],
             monthly_limit=limits["monthly"],
-            monthly_used=monthly_used,
+            monthly_used=user.monthly_operations,
             billing_period=billing_period,
         )
 

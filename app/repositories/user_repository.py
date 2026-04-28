@@ -15,6 +15,12 @@ class UserRepository(BaseRepository[User]):
     def get_by_username(self, username: str) -> User | None:
         return self.db.query(User).filter(User.username == username).first()
 
+    def get_by_verification_token(self, token_hash: str) -> User | None:
+        return self.db.query(User).filter(User.verification_token == token_hash).first()
+
+    def get_by_reset_token(self, token_hash: str) -> User | None:
+        return self.db.query(User).filter(User.reset_token == token_hash).first()
+
     def update(self, user: User, **fields) -> User:
         for key, value in fields.items():
             setattr(user, key, value)

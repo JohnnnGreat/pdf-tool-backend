@@ -1,0 +1,55 @@
+# =============================================================================
+# Development image — single stage, includes all system deps + hot reload.
+# The entire project directory is bind-mounted so code changes are instant.
+# =============================================================================
+FROM python:3.11-slim
+
+# Install all system and build dependencies in one layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools (needed for some pip packages in dev)
+    gcc \
+    g++ \
+    libffi-dev \
+    libpq-dev \
+    # PostgreSQL client
+    postgresql-client \
+    libpq5 \
+    # LibreOffice
+    libreoffice \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    # Tesseract OCR
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    # Poppler
+    poppler-utils \
+    # Fonts
+    fonts-liberation \
+    fonts-dejavu-core \
+    # curl
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies — this layer is cached unless requirements.txt changes
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir "watchfiles==0.21.0"
+
+# The actual source code is NOT copied here —
+# it is bind-mounted at runtime by docker-compose for hot reload.
+
+EXPOSE 8000
+
+COPY scripts/entrypoint.dev.sh /entrypoint.dev.sh
+RUN chmod +x /entrypoint.dev.sh
+
+ENTRYPOINT ["/entrypoint.dev.sh"]
+CMD ["uvicorn", "run:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--reload", \
+     "--reload-dir", "app"]

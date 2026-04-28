@@ -1,14 +1,16 @@
 """Generator tools router — 10 endpoints."""
 import json
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import generator_service
 from app.utils.file_handler import ALLOWED_IMAGES, cleanup, make_job_dirs, make_zip, read_file, save_bytes, read_upload, validate_file_type
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/generate", tags=["Generator Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/generate", tags=["Generator Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):
@@ -54,11 +56,11 @@ async def generate_barcode(
 
 
 @router.post("/invoice")
-async def generate_invoice(request: Request, data_json: str = Form(...)):
+async def generate_invoice(request: Request):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
-        data = json.loads(data_json)
+        data = await request.json()
         output_path = f"{out}/invoice.pdf"
         generator_service.generate_invoice(data, output_path)
         pdf_data = read_file(output_path)
@@ -69,11 +71,11 @@ async def generate_invoice(request: Request, data_json: str = Form(...)):
 
 
 @router.post("/resume")
-async def generate_resume(request: Request, data_json: str = Form(...)):
+async def generate_resume(request: Request):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
-        data = json.loads(data_json)
+        data = await request.json()
         output_path = f"{out}/resume.pdf"
         generator_service.generate_resume(data, output_path)
         pdf_data = read_file(output_path)
@@ -84,11 +86,11 @@ async def generate_resume(request: Request, data_json: str = Form(...)):
 
 
 @router.post("/certificate")
-async def generate_certificate(request: Request, data_json: str = Form(...)):
+async def generate_certificate(request: Request):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
-        data = json.loads(data_json)
+        data = await request.json()
         output_path = f"{out}/certificate.pdf"
         generator_service.generate_certificate(data, output_path)
         pdf_data = read_file(output_path)

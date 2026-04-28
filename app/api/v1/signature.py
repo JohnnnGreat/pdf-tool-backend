@@ -1,5 +1,5 @@
 """Signature & stamp tools router — 4 endpoints."""
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import signature_service
@@ -9,7 +9,9 @@ from app.utils.file_handler import (
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/signature", tags=["Signature & Stamp Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/signature", tags=["Signature & Stamp Tools"], dependencies=[Depends(plan_guard)])
 
 
 def _rl(request: Request):

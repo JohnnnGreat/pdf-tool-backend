@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -40,6 +41,34 @@ async def read_upload(file: UploadFile) -> bytes:
     return content
 
 
+async def stream_upload_to_disk(file: UploadFile, directory: str, filename: str) -> str:
+    """Stream upload directly to disk in 64 KB chunks to avoid loading the entire file into RAM.
+
+    Raises HTTP 413 if the file exceeds MAX_FILE_SIZE_MB without reading it all first.
+    """
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    path = os.path.join(directory, filename)
+    total = 0
+    try:
+        with open(path, "wb") as f:
+            while True:
+                chunk = await file.read(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds {settings.MAX_FILE_SIZE_MB}MB limit",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(path):
+            os.unlink(path)
+        raise
+    return path
+
+
 def make_job_dirs() -> tuple[str, str, str]:
     job_id = str(uuid.uuid4())
     upload_dir = os.path.join(settings.UPLOAD_DIR, job_id)
@@ -71,3 +100,13 @@ def make_zip(file_paths: list[str], zip_path: str) -> None:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for fp in file_paths:
             zf.write(fp, os.path.basename(fp))
+
+
+def output_name(original: str | None, suffix: str, ext: str | None = None) -> str:
+    """Build a descriptive download filename: <original-stem>-<suffix>.<ext>"""
+    basename = os.path.basename(original or "")
+    stem = os.path.splitext(basename)[0].strip()
+    orig_ext = os.path.splitext(basename)[1] if basename else ""
+    final_ext = f".{ext.lstrip('.')}" if ext else (orig_ext or ".bin")
+    clean_stem = re.sub(r"[^\w\-]", "-", stem).strip("-") or suffix
+    return f"{clean_stem}-{suffix}{final_ext}"

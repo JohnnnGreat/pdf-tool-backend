@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -12,7 +13,11 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services.ai_service import AIService
 
-router  = APIRouter(prefix="/ai", tags=["AI"])
+logger = logging.getLogger(__name__)
+
+from app.core.plan_guard import plan_guard
+
+router  = APIRouter(prefix="/ai", tags=["AI"], dependencies=[Depends(plan_guard)])
 _svc    = AIService()
 
 _ALLOWED_MIME = {
@@ -43,7 +48,8 @@ async def ai_chat(
 
     try:
         parsed_history = json.loads(history)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Invalid chat history JSON — using empty history: %s", exc)
         parsed_history = []
 
     return StreamingResponse(

@@ -1,10 +1,39 @@
+# Environment — never commit secrets
 .env
+.env.prod
+.env.local
+
+# Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .pytest_cache/
 *.egg-info/
 dist/
 build/
+.eggs/
+.coverage
+htmlcov/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# SQLite dev database
+*.db
+
+# Runtime data — not source code
+uploads/*
+outputs/*
+!uploads/.gitkeep
+!outputs/.gitkeep
+
+# Nginx logs (mounted as volume)
+nginx/logs/

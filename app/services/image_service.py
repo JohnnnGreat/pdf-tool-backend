@@ -15,7 +15,12 @@ def compress_image(input_path: str, output_path: str, quality: int = 75) -> None
     fmt = "JPEG" if ext in (".jpg", ".jpeg") else ext.lstrip(".").upper()
     if img.mode in ("RGBA", "P") and fmt == "JPEG":
         img = img.convert("RGB")
-    img.save(output_path, format=fmt, quality=quality, optimize=True)
+    if fmt == "PNG":
+        # PNG is lossless — map quality (0-100) to compress_level (9-0)
+        compress_level = max(0, min(9, 9 - round(quality / 100 * 9)))
+        img.save(output_path, format="PNG", compress_level=compress_level)
+    else:
+        img.save(output_path, format=fmt, quality=quality, optimize=True)
 
 
 def resize_image(

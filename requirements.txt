@@ -35,6 +35,7 @@ python-barcode==0.15.1
 # Security
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.3.0
+pyotp>=2.9.0
 
 # Testing
 pytest==8.3.5
@@ -44,3 +45,9 @@ pytest-asyncio==0.25.3
 # Conversion Extras
 # Using LibreOffice for most conversions to avoid system DLL issues on Windows
 markdown>=3.7
+
+# Database migrations
+alembic==1.14.0
+
+# Structured logging
+python-json-logger==3.3.0

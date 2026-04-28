@@ -15,6 +15,7 @@ TIER_LIMITS: dict[str, dict] = {
 }
 
 VALID_TIERS = list(TIER_LIMITS.keys())
+TIER_ORDER = VALID_TIERS  # ascending priority: free < lite < starter < pro < business < enterprise
 
 
 # ---------- Request schemas ----------

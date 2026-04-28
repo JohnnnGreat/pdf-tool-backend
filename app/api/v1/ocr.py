@@ -1,7 +1,7 @@
 """OCR tools router — 6 endpoints."""
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
 
 from app.services import ocr_service
@@ -11,7 +11,9 @@ from app.utils.file_handler import (
 )
 from app.utils.rate_limiter import get_client_ip, rate_limiter
 
-router = APIRouter(prefix="/ocr", tags=["OCR Tools"])
+from app.core.plan_guard import plan_guard
+
+router = APIRouter(prefix="/ocr", tags=["OCR Tools"], dependencies=[Depends(plan_guard)])
 
 ALLOWED_OCR = ALLOWED_PDF + ALLOWED_IMAGES
 

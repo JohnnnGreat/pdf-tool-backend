@@ -64,16 +64,24 @@ def split_pdf_ranges(input_path: str, output_dir: str, ranges: str) -> list[str]
 # Compress / Rotate
 # ---------------------------------------------------------------------------
 
-def compress_pdf(input_path: str, output_path: str) -> None:
+def compress_pdf(input_path: str, output_path: str, quality: str = "medium") -> None:
     doc = fitz.open(input_path)
+    # compression_effort: 0 = no effort (fast, larger), 100 = max effort (slow, smallest)
+    if quality == "low":
+        effort = 100
+    elif quality == "high":
+        effort = 20
+    else:
+        effort = 60
     doc.save(
-        output_path, 
-        garbage=4, 
-        deflate=True, 
-        deflate_images=True, 
+        output_path,
+        garbage=4,
+        deflate=True,
+        deflate_images=True,
         deflate_fonts=True,
         use_objstms=1,
-        clean=True
+        clean=True,
+        compression_effort=effort,
     )
     doc.close()
 
@@ -164,12 +172,14 @@ def add_text_watermark(
         # Matrix to rotate around the insertion point
         matrix = fitz.Matrix(45)
         page.insert_text(
-            fitz.Point(rect.width * 0.1, rect.height * 0.6), # adjusted start point
+            fitz.Point(rect.width * 0.1, rect.height * 0.6),
             text,
             fontsize=font_size,
             color=(0.5, 0.5, 0.5),
+            fill_opacity=opacity,
+            stroke_opacity=opacity,
             morph=(fitz.Point(rect.width * 0.3, rect.height * 0.5), matrix),
-            overlay=True, # Overlay true for watermark
+            overlay=True,
         )
     doc.save(output_path)
     doc.close()
@@ -218,8 +228,8 @@ def crop_pdf(input_path: str, output_path: str, x: float, y: float, width: float
 def flatten_pdf(input_path: str, output_path: str) -> None:
     reader = PdfReader(input_path)
     writer = PdfWriter()
-    for page in reader.pages:
-        writer.add_page(page)
+    writer.append(reader)
+    writer.flatten_fields()
     with open(output_path, "wb") as f:
         writer.write(f)
 
