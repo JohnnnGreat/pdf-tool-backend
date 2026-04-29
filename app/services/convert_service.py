@@ -7,6 +7,14 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.core.config import settings
+from rust_converter import (
+    DocxGenerationError as RustDocxGenerationError,
+    InvalidPdfError as RustInvalidPdfError,
+    RustConversionError,
+    RustModuleNotBuiltError,
+    UnsupportedScannedPdfError as RustUnsupportedScannedPdfError,
+    convert_pdf_to_docx as rust_convert_pdf_to_docx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,25 +34,40 @@ def _resolve_libreoffice_path() -> str:
     return str(resolved)
 
 
-def _libreoffice_convert(input_path: str, output_dir: str, target_format: str) -> str:
+def _libreoffice_convert(
+    input_path: str,
+    output_dir: str,
+    target_format: str,
+    extra_args: list[str] | None = None,
+) -> str:
     lo = _resolve_libreoffice_path()
+    cmd = [lo, "--headless"]
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd += ["--convert-to", target_format, "--outdir", output_dir, input_path]
+    # Set HOME to a writable temp dir so LibreOffice can create its user profile.
+    # Without this, non-root Docker users see "no export filter found" errors.
+    env = os.environ.copy()
+    env.setdefault("HOME", "/tmp")
     result = subprocess.run(
-        [lo, "--headless", "--convert-to", target_format, "--outdir", output_dir, input_path],
-        capture_output=True, text=True, timeout=120,
+        cmd,
+        capture_output=True, text=True, timeout=120, env=env,
     )
     if result.returncode != 0:
         logger.debug("LO stdout: %s", result.stdout)
         logger.debug("LO stderr: %s", result.stderr)
         raise HTTPException(status_code=500,
                             detail=f"LibreOffice conversion failed: {result.stderr or result.stdout}")
+    # LibreOffice names the output after the input stem; find the actual file.
+    ext = target_format.split(":")[0].lower()   # handles "docx:MS Word 2007 XML" → "docx"
     stem = Path(input_path).stem
     matches = [
         f for f in os.listdir(output_dir)
-        if f.lower().startswith(stem.lower()) and f.lower().endswith(f".{target_format.lower()}")
+        if f.lower().startswith(stem.lower()) and f.lower().endswith(f".{ext}")
     ]
     if not matches:
         raise HTTPException(status_code=500,
-                            detail=f"Conversion output not found for {stem}.{target_format}")
+                            detail=f"Conversion output not found for {stem}.{ext}")
     return os.path.join(output_dir, matches[0])
 
 
@@ -65,81 +88,494 @@ def pptx_to_pdf(input_path: str, output_dir: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# PDF → Word  (pdf2docx for digital, Tesseract+pdf2docx for scanned)
+# PDF → Word  — multi-strategy engine
+# ---------------------------------------------------------------------------
+# Strategy selection:
+#   1. Analyse: count extractable chars to decide digital vs scanned
+#   2a. Digital → pdf2docx  (best-in-class layout reconstruction)
+#         If pdf2docx fails → custom PyMuPDF + python-docx extractor
+#         If that fails     → LibreOffice writer_pdf_import (emergency)
+#   2b. Scanned → Tesseract per-page OCR → structured python-docx
 # ---------------------------------------------------------------------------
 
-def pdf_to_word(input_path: str, output_path: str) -> None:
-    """
-    Digital PDFs  → pdf2docx (best-in-class layout fidelity)
-    Scanned PDFs  → Tesseract OCR → searchable PDF → pdf2docx
-    """
+def _count_chars(input_path: str, pages: int = 5) -> int:
+    """Return the number of extractable text chars from the first N pages."""
     import fitz
-    pdf = fitz.open(input_path)
-    sample_chars = sum(len(pdf[i].get_text().strip()) for i in range(min(3, len(pdf))))
-    pdf.close()
-    if sample_chars < 80:
-        _pdf_to_word_scanned(input_path, output_path)
-    else:
-        _pdf_to_word_digital(input_path, output_path)
+    doc = fitz.open(input_path)
+    total = 0
+    for i in range(min(pages, len(doc))):
+        total += len(doc[i].get_text().strip())
+    doc.close()
+    return total
 
 
-def _pdf_to_word_digital(input_path: str, output_path: str) -> None:
+def _pdf_to_word_pdf2docx(input_path: str, output_path: str) -> None:
+    """Strategy 1: pdf2docx — best layout fidelity for digital PDFs."""
     from pdf2docx import Converter
+    import fitz
+
+    # Pre-check: count pages and chars so we can validate output quality
+    doc_check = fitz.open(input_path)
+    num_pages = len(doc_check)
+    total_chars = sum(len(doc_check[i].get_text().strip()) for i in range(min(num_pages, 5)))
+    doc_check.close()
+
     cv = Converter(input_path)
     cv.convert(output_path, start=0, end=None)
     cv.close()
 
+    # pdf2docx sometimes writes a near-empty file on silent failure.
+    # Use a size threshold proportional to content: at least 1 KB per page
+    # or 2 KB minimum, whichever is larger.
+    min_expected = max(2048, num_pages * 1024)
+    if not os.path.exists(output_path) or os.path.getsize(output_path) < min_expected:
+        raise RuntimeError(
+            f"pdf2docx produced a suspiciously small output "
+            f"({os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes "
+            f"for {num_pages} pages, expected >{min_expected})"
+        )
+
+    # Secondary quality check: open the docx and verify it has meaningful text
+    try:
+        from docx import Document as _Doc
+        _d = _Doc(output_path)
+        extracted = " ".join(p.text for p in _d.paragraphs).strip()
+        # If the PDF had text but the docx has almost none, it's a bad conversion
+        if total_chars > 200 and len(extracted) < max(50, total_chars * 0.10):
+            raise RuntimeError(
+                f"pdf2docx output has too little text ({len(extracted)} chars) "
+                f"compared to source PDF ({total_chars} chars)"
+            )
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.debug("pdf2docx quality check skipped: %s", e)
+
+
+def _pdf_to_word_pymupdf(input_path: str, output_path: str) -> None:
+    """
+    Strategy 2: Custom PyMuPDF + python-docx extractor.
+
+    Improvements over the original:
+    - Groups lines into paragraphs by vertical proximity (instead of one para per line)
+    - Preserves text alignment (left / center / right / justify) per block
+    - Preserves font family from PDF spans (not just Calibri)
+    - Detects headings by font size AND bold flag
+    - Embeds images at correct proportional width
+    - Extracts tables via pdfplumber with header styling
+    - Sets page size to match the PDF page dimensions
+    """
+    import fitz
+    from docx import Document
+    from docx.shared import Pt, Inches, Emu, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    import io
+
+    try:
+        import pdfplumber
+        HAS_PLUMBER = True
+    except ImportError:
+        HAS_PLUMBER = False
+
+    doc_out = Document()
+
+    # ── Style defaults ────────────────────────────────────────────────────────
+    style = doc_out.styles["Normal"]
+    style.font.name = "Calibri"
+    style.font.size = Pt(11)
+
+    pdf = fitz.open(input_path)
+
+    # Pre-compute per-page table bounding boxes so we can skip those blocks
+    page_tables: dict[int, list] = {}
+    if HAS_PLUMBER:
+        try:
+            with pdfplumber.open(input_path) as plumb:
+                for p_idx, page in enumerate(plumb.pages):
+                    tbls = page.find_tables()
+                    page_tables[p_idx] = [t.bbox for t in tbls] if tbls else []
+        except Exception:
+            pass
+
+    def _in_table(bbox, p_idx: int) -> bool:
+        x0, y0, x1, y1 = bbox
+        for tb in page_tables.get(p_idx, []):
+            tx0, ty0, tx1, ty1 = tb
+            if x0 >= tx0 - 2 and y0 >= ty0 - 2 and x1 <= tx1 + 2 and y1 <= ty1 + 2:
+                return True
+        return False
+
+    def _add_table_from_plumber(p_idx: int) -> None:
+        if not HAS_PLUMBER:
+            return
+        try:
+            with pdfplumber.open(input_path) as plumb:
+                page = plumb.pages[p_idx]
+                for tbl in page.extract_tables() or []:
+                    if not tbl:
+                        continue
+                    rows = [[str(c or "") for c in row] for row in tbl]
+                    t = doc_out.add_table(rows=len(rows), cols=len(rows[0]))
+                    t.style = "Table Grid"
+                    for r_i, row in enumerate(rows):
+                        for c_i, val in enumerate(row):
+                            cell = t.cell(r_i, c_i)
+                            cell.text = val
+                            if r_i == 0:
+                                for run in cell.paragraphs[0].runs:
+                                    run.bold = True
+        except Exception as e:
+            logger.debug("pdfplumber table extract failed: %s", e)
+
+    def _get_alignment(block, page_width: float) -> WD_ALIGN_PARAGRAPH:
+        """Infer paragraph alignment from block position on the page."""
+        x0, _, x1, _ = block["bbox"]
+        block_center = (x0 + x1) / 2
+        page_center = page_width / 2
+        block_width = x1 - x0
+
+        # Center-aligned: block center is near page center and block is not full-width
+        if abs(block_center - page_center) < page_width * 0.08 and block_width < page_width * 0.7:
+            return WD_ALIGN_PARAGRAPH.CENTER
+        # Right-aligned: block starts in the right 40% of the page
+        if x0 > page_width * 0.6:
+            return WD_ALIGN_PARAGRAPH.RIGHT
+        return WD_ALIGN_PARAGRAPH.LEFT
+
+    def _group_lines_into_paragraphs(lines: list) -> list[list]:
+        """
+        Group consecutive lines into paragraphs based on vertical gap.
+        A gap larger than 1.5× the line height signals a new paragraph.
+        """
+        if not lines:
+            return []
+        groups = [[lines[0]]]
+        for line in lines[1:]:
+            prev = groups[-1][-1]
+            prev_y1 = prev["bbox"][3]
+            curr_y0 = line["bbox"][1]
+            # Estimate line height from the previous line's spans
+            prev_heights = [s["size"] for s in prev["spans"] if s["text"].strip()]
+            line_h = max(prev_heights) if prev_heights else 12
+            gap = curr_y0 - prev_y1
+            if gap > line_h * 1.2:
+                groups.append([line])
+            else:
+                groups[-1].append(line)
+        return groups
+
+    def _safe_font(font_name: str) -> str:
+        """Map PDF font names to safe Word-compatible equivalents."""
+        fn = font_name.lower()
+        if any(x in fn for x in ("arial", "helvetica", "sans")):
+            return "Arial"
+        if any(x in fn for x in ("times", "serif", "roman")):
+            return "Times New Roman"
+        if any(x in fn for x in ("courier", "mono", "consol")):
+            return "Courier New"
+        if "georgia" in fn:
+            return "Georgia"
+        if "verdana" in fn:
+            return "Verdana"
+        if "calibri" in fn:
+            return "Calibri"
+        # Strip subset prefix like "ABCDEF+FontName"
+        if "+" in font_name:
+            base = font_name.split("+", 1)[1]
+            return _safe_font(base)
+        return "Calibri"  # safe default
+
+    for p_idx, page in enumerate(pdf):
+        page_width = page.rect.width
+        page_height = page.rect.height
+
+        # Set the section page size to match the PDF page (first page only)
+        if p_idx == 0:
+            section = doc_out.sections[0]
+            # PDF points → EMU (1 pt = 12700 EMU)
+            section.page_width  = Emu(int(page_width  * 12700))
+            section.page_height = Emu(int(page_height * 12700))
+            # Proportional margins: ~1 inch on each side
+            margin = Emu(int(72 * 12700))  # 72 pt = 1 inch
+            section.left_margin   = margin
+            section.right_margin  = margin
+            section.top_margin    = margin
+            section.bottom_margin = margin
+
+        blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+
+        # Estimate body font size for heading detection (median of all span sizes)
+        sizes = []
+        for b in blocks:
+            if b["type"] != 0:
+                continue
+            for line in b["lines"]:
+                for span in line["spans"]:
+                    if span["text"].strip():
+                        sizes.append(round(span["size"]))
+        body_size = sorted(sizes)[len(sizes) // 2] if sizes else 11
+
+        tables_added_for_page = False
+
+        for b in blocks:
+            if b["type"] == 1:
+                # Image block — embed inline at proportional width
+                try:
+                    bx0, by0, bx1, by1 = b["bbox"]
+                    img_w_pt = bx1 - bx0
+                    # Convert PDF points to inches (72 pt/inch), cap at usable width
+                    usable_w = (page_width - 144) / 72  # page minus 2-inch margins
+                    img_w_in = min(img_w_pt / 72, usable_w)
+                    img_bytes = page.get_pixmap(clip=fitz.Rect(b["bbox"]), dpi=150).tobytes("png")
+                    buf = io.BytesIO(img_bytes)
+                    doc_out.add_picture(buf, width=Inches(img_w_in))
+                except Exception:
+                    pass
+                continue
+
+            if b["type"] != 0:
+                continue
+
+            # Skip blocks that fall inside a detected table
+            if _in_table(b["bbox"], p_idx):
+                if not tables_added_for_page:
+                    _add_table_from_plumber(p_idx)
+                    tables_added_for_page = True
+                continue
+
+            alignment = _get_alignment(b, page_width)
+            all_lines = b["lines"]
+            para_groups = _group_lines_into_paragraphs(all_lines)
+
+            for group in para_groups:
+                # Collect full text and dominant properties for this paragraph group
+                group_text = " ".join(
+                    "".join(s["text"] for s in line["spans"]).strip()
+                    for line in group
+                ).strip()
+
+                if not group_text:
+                    continue
+
+                # Determine heading level from font size delta vs body
+                max_size = max(
+                    (round(s["size"]) for line in group for s in line["spans"] if s["text"].strip()),
+                    default=body_size,
+                )
+                delta = max_size - body_size
+
+                # Also check if all spans in the group are bold (another heading signal)
+                all_bold = all(
+                    bool(s["flags"] & 2**4)
+                    for line in group for s in line["spans"] if s["text"].strip()
+                )
+
+                if delta >= 8 or (delta >= 4 and all_bold):
+                    para = doc_out.add_heading(group_text, level=1)
+                    para.alignment = alignment
+                elif delta >= 5:
+                    para = doc_out.add_heading(group_text, level=2)
+                    para.alignment = alignment
+                elif delta >= 3:
+                    para = doc_out.add_heading(group_text, level=3)
+                    para.alignment = alignment
+                else:
+                    para = doc_out.add_paragraph()
+                    para.alignment = alignment
+                    # Add runs span-by-span to preserve inline formatting
+                    for line in group:
+                        for span in line["spans"]:
+                            if not span["text"]:
+                                continue
+                            run = para.add_run(span["text"])
+                            run.bold   = bool(span["flags"] & 2**4)
+                            run.italic = bool(span["flags"] & 2**1)
+                            run.font.size = Pt(round(span["size"]))
+                            # Font family
+                            font_name = _safe_font(span.get("font", ""))
+                            run.font.name = font_name
+                            # Colour
+                            c = span.get("color", 0)
+                            r, g, bv = (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF
+                            if (r, g, bv) != (0, 0, 0):
+                                run.font.color.rgb = RGBColor(r, g, bv)
+                        # Add a soft line break between lines within the same paragraph group
+                        # (except after the last line)
+                        if line is not group[-1]:
+                            run = para.add_run()
+                            run.add_break()
+
+        # Page break between pages (except last)
+        if p_idx < len(pdf) - 1:
+            doc_out.add_page_break()
+
+    pdf.close()
+    doc_out.save(output_path)
+
+    if os.path.getsize(output_path) < 512:
+        raise RuntimeError("PyMuPDF extractor produced an empty output")
+
 
 def _pdf_to_word_scanned(input_path: str, output_path: str) -> None:
-    """Render → Tesseract OCR PDF (text layer) → pdf2docx for full layout analysis."""
+    """
+    Strategy for scanned PDFs: render each page → Tesseract OCR →
+    build a clean DOCX preserving paragraph structure.
+    """
     import fitz
     import io
-    import tempfile
+    from docx import Document
+    from docx.shared import Pt, Inches
 
     try:
         import pytesseract
         from PIL import Image
         if settings.TESSERACT_PATH:
             pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_PATH
-        HAS_OCR = True
     except ImportError:
-        HAS_OCR = False
-
-    if not HAS_OCR:
-        _pdf_to_word_digital(input_path, output_path)
+        # No Tesseract → fall back to digital extractor anyway
+        _pdf_to_word_pymupdf(input_path, output_path)
         return
 
+    doc_out = Document()
+    for section in doc_out.sections:
+        section.left_margin = section.right_margin = Inches(1.0)
+        section.top_margin  = section.bottom_margin = Inches(1.0)
+
     pdf = fitz.open(input_path)
-    page_pdfs: list[bytes] = []
-    for page in pdf:
-        mat = fitz.Matrix(2.0, 2.0)
+    for p_idx, page in enumerate(pdf):
+        mat = fitz.Matrix(2.0, 2.0)          # 2× = 144 DPI — good OCR quality
         pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
         img = Image.open(io.BytesIO(pix.tobytes("png")))
-        ocr_pdf = pytesseract.image_to_pdf_or_hocr(
-            img, extension="pdf", config="--psm 1 --oem 3",
-        )
-        page_pdfs.append(ocr_pdf)
+        raw_text = pytesseract.image_to_string(img, config="--psm 1 --oem 3")
+
+        for line in raw_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                doc_out.add_paragraph()     # preserve blank lines
+                continue
+            para = doc_out.add_paragraph(stripped)
+            para.runs[0].font.size = Pt(11)
+            para.runs[0].font.name = "Calibri"
+
+        if p_idx < len(pdf) - 1:
+            doc_out.add_page_break()
+
     pdf.close()
+    doc_out.save(output_path)
 
-    merged = fitz.open()
-    for page_bytes in page_pdfs:
-        pg = fitz.open("pdf", page_bytes)
-        merged.insert_pdf(pg)
-        pg.close()
 
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
-    os.close(tmp_fd)
-    try:
-        merged.save(tmp_path)
-        merged.close()
-        _pdf_to_word_digital(tmp_path, output_path)
-    finally:
-        os.unlink(tmp_path)
+def _pdf_to_word_libreoffice(input_path: str, output_path: str) -> None:
+    """Emergency fallback: LibreOffice writer_pdf_import."""
+    output_dir = os.path.dirname(output_path)
+    lo_out = _libreoffice_convert(
+        input_path,
+        output_dir,
+        "docx:MS Word 2007 XML",
+        extra_args=["--infilter=writer_pdf_import"],
+    )
+    if lo_out != output_path and os.path.exists(lo_out):
+        os.replace(lo_out, output_path)
+
+
+def _legacy_pdf_to_word(input_path: str, output_path: str) -> None:
+    """
+    Smart PDF → DOCX conversion with cascading strategy selection.
+
+    Digital PDFs  → pdf2docx (best layout) → PyMuPDF+python-docx → LibreOffice
+    Scanned PDFs  → Tesseract OCR → structured DOCX
+    """
+    char_count = _count_chars(input_path)
+    is_scanned = char_count < 80
+
+    logger.info("pdf_to_word: chars=%d scanned=%s path=%s", char_count, is_scanned, input_path)
+
+    if is_scanned:
+        try:
+            _pdf_to_word_scanned(input_path, output_path)
+            logger.info("pdf_to_word: scanned strategy succeeded")
+            return
+        except Exception as e:
+            logger.warning("pdf_to_word: scanned strategy failed (%s) — falling back to LibreOffice", e)
+            _pdf_to_word_libreoffice(input_path, output_path)
+            return
+
+    # Digital PDF — try in order of quality
+    for name, strategy in [
+        ("pdf2docx",  _pdf_to_word_pdf2docx),
+        ("PyMuPDF",   _pdf_to_word_pymupdf),
+        ("LibreOffice", _pdf_to_word_libreoffice),
+    ]:
+        try:
+            strategy(input_path, output_path)
+            logger.info("pdf_to_word: strategy '%s' succeeded", name)
+            return
+        except Exception as e:
+            logger.warning("pdf_to_word: strategy '%s' failed (%s) — trying next", name, e)
+            # Clean up partial output before next attempt
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    raise HTTPException(
+        status_code=500,
+        detail="PDF to Word conversion failed. The file may be encrypted, corrupted, or in an unsupported format.",
+    )
+
 
 
 # ---------------------------------------------------------------------------
 # PDF → Excel  (pdfplumber — best table extraction accuracy)
 # ---------------------------------------------------------------------------
+
+def pdf_to_word(input_path: str, output_path: str) -> None:
+    """
+    Convert a PDF to DOCX using the custom Rust visual replica engine.
+
+    The Rust module extracts page sizes and text layout, renders each page
+    to a background image for fidelity, then writes a DOCX with absolutely
+    positioned text boxes over the rendered page image.
+    """
+    if os.path.exists(output_path):
+        os.remove(output_path)
+
+    try:
+        success = rust_convert_pdf_to_docx(input_path, output_path)
+    except RustModuleNotBuiltError as exc:
+        logger.exception("Rust PDF-to-DOCX module is unavailable: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Rust PDF-to-DOCX converter is not installed. "
+                "Build it with `maturin develop --release` from the backend root."
+            ),
+        ) from exc
+    except RustInvalidPdfError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RustUnsupportedScannedPdfError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (RustDocxGenerationError, RustConversionError) as exc:
+        logger.warning("Rust PDF-to-DOCX conversion failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        logger.exception("Unexpected Rust PDF-to-DOCX failure: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="PDF to Word conversion failed inside the Rust converter.",
+        ) from exc
+
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Rust PDF-to-DOCX converter returned an unsuccessful result.",
+        )
+
+    if not os.path.exists(output_path):
+        raise HTTPException(
+            status_code=500,
+            detail="Rust PDF-to-DOCX converter did not create an output file.",
+        )
+
 
 def pdf_to_excel(input_path: str, output_path: str) -> None:
     """

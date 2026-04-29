@@ -39,10 +39,12 @@ services:
       LIBREOFFICE_PATH: /usr/bin/libreoffice
       UPLOAD_DIR: /app/uploads
       OUTPUT_DIR: /app/outputs
+      PDFIUM_AUTO_CACHE_DIR: /home/docforge/.cache/pdfium-auto
       DEBUG: "false"
     volumes:
       - uploads_data:/app/uploads
       - outputs_data:/app/outputs
+      - pdfium_cache_data:/home/docforge/.cache/pdfium-auto
     expose:
       # Only exposed to Nginx internally, not to the host
       - "8000"
@@ -159,6 +161,7 @@ volumes:
   redis_data:
   uploads_data:
   outputs_data:
+  pdfium_cache_data:
   nginx_logs:
   certbot_certs:
   certbot_webroot:

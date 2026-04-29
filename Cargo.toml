@@ -1,0 +1,19 @@
+[package]
+name = "rust_converter_native"
+version = "0.1.0"
+edition = "2021"
+description = "Rust-powered PDF to DOCX visual replica converter for DocForge"
+license = "MIT"
+
+[lib]
+name = "_rust_converter"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0.100"
+image = { version = "0.25.6", default-features = false, features = ["png"] }
+pdfium-auto = "0.3.0"
+pdfium-render = { version = "0.8.37", default-features = true }
+pyo3 = { version = "0.28.2", features = ["extension-module"] }
+thiserror = "2.0.11"
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }

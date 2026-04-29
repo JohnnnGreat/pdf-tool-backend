@@ -60,6 +60,57 @@ DocForge is a PDF and document processing SaaS platform. The backend exposes a R
 
 ---
 
+## Rust PDF-to-DOCX Engine
+
+The `/api/v1/convert/pdf-to-word` endpoint now uses a custom Rust engine exposed to Python via `PyO3` and built with `maturin`.
+
+### What v1 does
+
+- Opens the PDF in Rust
+- Reads page sizes
+- Extracts text objects and bounding boxes from digital PDFs
+- Preserves layout in a visual replica DOCX mode
+- Renders each PDF page to a background image for fidelity
+- Overlays absolutely positioned text boxes so the DOCX stays searchable
+
+### Current v1 limitations
+
+- Focuses on visual fidelity, not clean editing semantics
+- Rejects scanned PDFs with no extractable text layer
+- Uses page background images rather than paragraph reconstruction
+- Leaves OCR, tables, semantic paragraph rebuilding, and layout scoring for future versions
+
+### Build the Rust extension
+
+Install Rust and maturin first:
+
+```bash
+rustup default stable
+python -m pip install maturin
+```
+
+Build and install the extension into your active Python environment from the backend root:
+
+```bash
+maturin develop --release
+```
+
+The Python API exposed by the compiled module is:
+
+```python
+from rust_converter import convert_pdf_to_docx
+
+convert_pdf_to_docx("input.pdf", "output.docx")
+```
+
+Notes:
+
+- The Rust engine uses `pdfium-render` for parsing and rendering.
+- `pdfium-auto` downloads the matching `PDFium` binary on first use if one is not already cached locally.
+- To force a specific PDFium library path, set `PDFIUM_LIB_PATH`.
+
+---
+
 ## Project Structure
 
 ```
@@ -115,6 +166,7 @@ brew install tesseract libreoffice poppler
 python -m venv venv
 source venv/bin/activate       # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+maturin develop --release
 ```
 
 ### Configure environment
@@ -129,6 +181,21 @@ cp .env.example .env
 ```bash
 uvicorn app:app --reload --port 8000
 ```
+
+### Example API request
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/convert/pdf-to-word" \
+  -H "Authorization: Bearer <jwt_token>" \
+  -F "file=@sample.pdf" \
+  --output output.docx
+```
+
+### PDF-to-DOCX error cases
+
+- `400`: invalid or corrupted PDF
+- `422`: scanned PDF without extractable text
+- `500`: Rust module not built, DOCX generation failed, or output file missing
 
 ---
 

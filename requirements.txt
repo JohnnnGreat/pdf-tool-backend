@@ -41,6 +41,7 @@ pyotp>=2.9.0
 pytest==8.3.5
 httpx==0.28.1
 pytest-asyncio==0.25.3
+maturin>=1.13.0
 
 # Conversion Extras
 # Using LibreOffice for most conversions to avoid system DLL issues on Windows

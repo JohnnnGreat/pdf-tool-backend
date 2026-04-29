@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.13,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rust-converter"
+version = "0.1.0"
+description = "Rust-powered PDF-to-DOCX conversion engine for DocForge"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "DocForge" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Framework :: FastAPI",
+]
+
+[tool.maturin]
+module-name = "rust_converter._rust_converter"
+python-source = "."
+features = ["pyo3/extension-module"]

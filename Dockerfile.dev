@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build tools (needed for some pip packages in dev)
     gcc \
     g++ \
+    pkg-config \
+    libcairo2-dev \
     libffi-dev \
     libpq-dev \
     # PostgreSQL client
@@ -29,7 +31,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     # curl
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Rust toolchain for the PyO3/maturin extension build
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_HOME="/root/.cargo"
+ENV CARGO_TARGET_DIR="/tmp/rust-target"
+ENV PDFIUM_AUTO_CACHE_DIR="/tmp/pdfium-cache"
 
 WORKDIR /app
 

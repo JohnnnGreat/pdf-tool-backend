@@ -1,5 +1,6 @@
 """Conversion tools router — 18 endpoints."""
 import json
+import os
 from typing import Optional
 from urllib.parse import quote
 
@@ -54,6 +55,8 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...)):
         input_path = save_bytes(content, up, "input.pdf")
         output_path = f"{out}/output.docx"
         convert_service.pdf_to_word(input_path, output_path)
+        if not os.path.exists(output_path):
+            raise HTTPException(status_code=500, detail="Rust PDF-to-DOCX converter did not produce an output file.")
         data = read_file(output_path)
         return _file_response(data, "output.docx",
                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document")

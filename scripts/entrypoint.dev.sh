@@ -14,6 +14,11 @@ until pg_isready -h "$DB_HOST" -p "$DB_PORT" -q; do
 done
 
 echo "==> [dev] PostgreSQL is ready."
+echo "==> [dev] Building Rust converter extension..."
+mkdir -p "${CARGO_TARGET_DIR:-/tmp/rust-target}" "${PDFIUM_AUTO_CACHE_DIR:-/tmp/pdfium-cache}" /tmp/maturin-wheels
+rm -f /tmp/maturin-wheels/*.whl
+python -m maturin build --release --interpreter python --out /tmp/maturin-wheels
+python -m pip install --no-deps --force-reinstall /tmp/maturin-wheels/rust_converter-*.whl
 echo "==> [dev] Running database migrations..."
 alembic upgrade head
 echo "==> [dev] Starting uvicorn with hot reload..."

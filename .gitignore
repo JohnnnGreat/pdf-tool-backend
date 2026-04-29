@@ -17,6 +17,8 @@ build/
 .eggs/
 .coverage
 htmlcov/
+.maturin/
+target/
 
 # OS
 .DS_Store

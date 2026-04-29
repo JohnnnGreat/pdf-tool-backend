@@ -9,15 +9,34 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
+    pkg-config \
+    libcairo2-dev \
     libffi-dev \
     libpq-dev \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_HOME="/root/.cargo"
+ENV CARGO_TARGET_DIR="/tmp/rust-target"
+ENV PDFIUM_AUTO_CACHE_DIR="/tmp/pdfium-cache"
 
 COPY requirements.txt .
 
 RUN pip install --upgrade pip && \
+    pip install --no-cache-dir maturin && \
     pip install --prefix=/install --no-cache-dir -r requirements.txt && \
     pip install --prefix=/install --no-cache-dir "gunicorn==21.2.0"
+
+COPY Cargo.toml Cargo.lock pyproject.toml README.md ./
+COPY rust_converter/ ./rust_converter/
+COPY src/ ./src/
+
+RUN python -m maturin build --release --interpreter python --out /dist && \
+    pip install --prefix=/install --no-cache-dir /dist/rust_converter-*.whl
 
 
 # =============================================================================
@@ -59,14 +78,18 @@ RUN groupadd --gid 1001 docforge && \
 
 WORKDIR /app
 
+ENV PDFIUM_AUTO_CACHE_DIR="/home/docforge/.cache/pdfium-auto"
+
 # Create directories for file processing, owned by our app user
-RUN mkdir -p uploads outputs && \
-    chown -R docforge:docforge /app
+RUN mkdir -p uploads outputs /home/docforge/.cache/pdfium-auto && \
+    chown -R docforge:docforge /app /home/docforge/.cache
 
 # Copy application source
 COPY --chown=docforge:docforge app/           ./app/
+COPY --chown=docforge:docforge alembic/       ./alembic/
 COPY --chown=docforge:docforge templates/     ./templates/
 COPY --chown=docforge:docforge run.py         ./run.py
+COPY --chown=docforge:docforge alembic.ini    ./alembic.ini
 COPY --chown=docforge:docforge requirements.txt ./requirements.txt
 
 # Copy and prepare the entrypoint script
