@@ -37,7 +37,8 @@
       "Bash(/c/Users/user/John/pdf-tool-backend/venv/Scripts/alembic upgrade *)",
       "Bash(python -)",
       "Bash(python -c ' *)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(docker exec *)"
     ]
   }
 }

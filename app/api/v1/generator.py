@@ -60,12 +60,28 @@ async def generate_invoice(request: Request):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
-        data = await request.json()
-        output_path = f"{out}/invoice.pdf"
-        generator_service.generate_invoice(data, output_path)
-        pdf_data = read_file(output_path)
-        return Response(content=pdf_data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="invoice.pdf"'})
+        data   = await request.json()
+        fmt    = (data.get("format") or "pdf").lower()
+        inv_no = (data.get("invoice_number") or "invoice").replace("/", "-")
+
+        if fmt == "xlsx":
+            output_path = f"{out}/invoice.xlsx"
+            generator_service.generate_invoice_xlsx(data, output_path)
+            file_data = read_file(output_path)
+            return Response(
+                content=file_data,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{inv_no}.xlsx"'},
+            )
+        else:
+            output_path = f"{out}/invoice.pdf"
+            generator_service.generate_invoice(data, output_path)
+            file_data = read_file(output_path)
+            return Response(
+                content=file_data,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{inv_no}.pdf"'},
+            )
     finally:
         cleanup(up, out)
 
@@ -75,12 +91,28 @@ async def generate_resume(request: Request):
     _rl(request)
     _, up, out = make_job_dirs()
     try:
-        data = await request.json()
-        output_path = f"{out}/resume.pdf"
-        generator_service.generate_resume(data, output_path)
-        pdf_data = read_file(output_path)
-        return Response(content=pdf_data, media_type="application/pdf",
-                        headers={"Content-Disposition": 'attachment; filename="resume.pdf"'})
+        data  = await request.json()
+        fmt   = (data.get("format") or "pdf").lower()
+        fname = (data.get("name") or "resume").replace(" ", "_")
+
+        if fmt == "docx":
+            output_path = f"{out}/resume.docx"
+            generator_service.generate_resume_docx(data, output_path)
+            file_data = read_file(output_path)
+            return Response(
+                content=file_data,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={"Content-Disposition": f'attachment; filename="{fname}.docx"'},
+            )
+        else:
+            output_path = f"{out}/resume.pdf"
+            generator_service.generate_resume(data, output_path)
+            file_data = read_file(output_path)
+            return Response(
+                content=file_data,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{fname}.pdf"'},
+            )
     finally:
         cleanup(up, out)
 

@@ -6,16 +6,13 @@ from pydantic import BaseModel, Field
 # ---------- Tier config (single source of truth) ----------
 
 TIER_LIMITS: dict[str, dict] = {
-    "free":       {"monthly": 100,     "per_minute": 10,  "price_monthly": 0,   "price_yearly": 0},
-    "lite":       {"monthly": 500,     "per_minute": 20,  "price_monthly": 9,   "price_yearly": 86},
-    "starter":    {"monthly": 2_000,   "per_minute": 30,  "price_monthly": 19,  "price_yearly": 182},
-    "pro":        {"monthly": 10_000,  "per_minute": 60,  "price_monthly": 49,  "price_yearly": 470},
-    "business":   {"monthly": 50_000,  "per_minute": 90,  "price_monthly": 99,  "price_yearly": 950},
-    "enterprise": {"monthly": None,    "per_minute": 120, "price_monthly": 249, "price_yearly": 2388},
+    "free":       {"monthly": 200,    "per_minute": 10,  "price_monthly": 0,  "price_yearly": 0},
+    "pro":        {"monthly": 5_000,  "per_minute": 60,  "price_monthly": 3,  "price_yearly": 29},
+    "enterprise": {"monthly": None,   "per_minute": 120, "price_monthly": 9,  "price_yearly": 89},
 }
 
 VALID_TIERS = list(TIER_LIMITS.keys())
-TIER_ORDER = VALID_TIERS  # ascending priority: free < lite < starter < pro < business < enterprise
+TIER_ORDER = VALID_TIERS  # ascending priority: free < pro < enterprise
 
 
 # ---------- Request schemas ----------
@@ -25,7 +22,7 @@ class APIKeyCreate(BaseModel):
 
 
 class APIKeyUpgradeTier(BaseModel):
-    tier: str = Field(description="Target tier: free | lite | starter | pro | business | enterprise")
+    tier: str = Field(description="Target tier: free | pro | enterprise")
 
     def validate_tier(self) -> "APIKeyUpgradeTier":
         if self.tier not in VALID_TIERS:

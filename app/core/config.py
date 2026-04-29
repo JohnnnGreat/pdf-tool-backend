@@ -46,7 +46,9 @@ class Settings(BaseSettings):
 
     # AI providers
     GEMINI_API_KEY: str = ""    # from Google AI Studio (aistudio.google.com)
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GROQ_API_KEY: str   = ""    # from console.groq.com
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # CORS
     ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]

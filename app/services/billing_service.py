@@ -27,74 +27,42 @@ PLAN_META: dict[str, dict] = {
         "name": "Free",
         "popular": False,
         "features": [
-            "100 API requests / month",
+            "200 requests / month",
             "10 requests / minute",
             "All 50+ tools",
             "Community support",
-        ],
-    },
-    "lite": {
-        "name": "Lite",
-        "popular": False,
-        "features": [
-            "500 API requests / month",
-            "20 requests / minute",
-            "All 50+ tools",
-            "Email support",
-        ],
-    },
-    "starter": {
-        "name": "Starter",
-        "popular": False,
-        "features": [
-            "2,000 API requests / month",
-            "30 requests / minute",
-            "All 50+ tools",
-            "Email support",
-            "Priority processing",
         ],
     },
     "pro": {
         "name": "Pro",
         "popular": True,
         "features": [
-            "10,000 API requests / month",
+            "5,000 requests / month",
             "60 requests / minute",
             "All 50+ tools",
             "Priority support",
             "Batch processing",
             "Advanced analytics",
-        ],
-    },
-    "business": {
-        "name": "Business",
-        "popular": False,
-        "features": [
-            "50,000 API requests / month",
-            "90 requests / minute",
-            "All 50+ tools",
-            "Dedicated support",
-            "Batch processing",
-            "Advanced analytics",
-            "Team access",
+            "No watermarks",
         ],
     },
     "enterprise": {
         "name": "Enterprise",
         "popular": False,
         "features": [
-            "Unlimited API requests",
+            "Unlimited requests",
             "120 requests / minute",
             "All 50+ tools",
             "Dedicated account manager",
             "Custom rate limits",
             "99.9% uptime SLA",
+            "Team access",
             "Custom integrations",
         ],
     },
 }
 
-TIER_ORDER = ["free", "lite", "starter", "pro", "business", "enterprise"]
+TIER_ORDER = ["free", "pro", "enterprise"]
 
 
 class BillingService:
@@ -231,11 +199,30 @@ class BillingService:
             resp = httpx.post(
                 "https://api.paystack.co/transaction/initialize",
                 json=payload,
-                headers={"Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}"},
+                headers={
+                    "Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}",
+                    "Content-Type": "application/json",
+                },
                 timeout=15,
             )
             resp.raise_for_status()
             data = resp.json()["data"]
+        except httpx.HTTPStatusError as exc:
+            message = None
+            next_step = None
+            try:
+                body = exc.response.json()
+                message = body.get("message")
+                meta = body.get("meta") or {}
+                next_step = meta.get("next_step") or meta.get("nextStep")
+            except ValueError:
+                pass
+            detail = f"Paystack error ({exc.response.status_code})"
+            if message:
+                detail += f": {message}"
+            if next_step:
+                detail += f" Next step: {next_step}"
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
         except httpx.HTTPError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -337,6 +324,22 @@ class BillingService:
             )
             resp.raise_for_status()
             body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            message = None
+            next_step = None
+            try:
+                body = exc.response.json()
+                message = body.get("message")
+                meta = body.get("meta") or {}
+                next_step = meta.get("next_step") or meta.get("nextStep")
+            except ValueError:
+                pass
+            detail = f"Paystack verification error ({exc.response.status_code})"
+            if message:
+                detail += f": {message}"
+            if next_step:
+                detail += f" Next step: {next_step}"
+            raise HTTPException(status_code=502, detail=detail)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Paystack verification error: {exc}")
 

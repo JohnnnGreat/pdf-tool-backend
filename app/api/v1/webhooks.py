@@ -10,7 +10,7 @@ Paystack
   • Webhook URL  : POST /api/v1/webhooks/paystack
   • Verification : HMAC-SHA512(raw_body, PAYSTACK_SECRET_KEY)
                    header: x-paystack-signature
-  • Plans        : set metadata key "tier" on each plan  →  starter | pro | enterprise
+  • Plans        : set metadata key "tier" on each plan  →  pro | enterprise
   • Events used  : charge.success  /  invoice.payment_success
 
 Flutterwave
@@ -86,7 +86,7 @@ def _resolve_tier(raw: str | None) -> str:
     if clean in VALID_TIERS:
         return clean
     # substring, most specific first
-    for tier in ("enterprise", "business", "pro", "starter", "lite"):
+    for tier in ("enterprise", "pro"):
         if tier in clean:
             return tier
     return "free"
@@ -117,7 +117,7 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
     """Handles Paystack charge.success and invoice.payment_success events.
 
     Set in Paystack Dashboard → Settings → API Keys & Webhooks.
-    Add metadata key **tier** (value: starter | pro | enterprise) to each plan.
+    Add metadata key **tier** (value: pro | enterprise) to each plan.
     """
     body = await _raw_body(request)
 

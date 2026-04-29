@@ -93,3 +93,28 @@ def digital_sign(input_path: str, output_path: str, cert_path: str, cert_passwor
                 writer.write(outf)
     except ImportError:
         raise HTTPException(status_code=501, detail="pyhanko not installed. Run: pip install pyhanko")
+
+
+def qtsp_mock_sign(input_path: str, output_path: str, provider: str, cert_pin: str) -> None:
+    """
+    Simulates a remote QTSP eIDAS signing process.
+    In production, this would make an API call to a Qualified Trust Service Provider
+    (like GlobalSign or DocuSign) and return a legally binding signed PDF.
+    """
+    import shutil
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Initiating QTSP signing with provider: {provider} using pin: ***")
+    
+    # Normally we would hash the document and send the hash to the provider
+    # For now, we mock success by stamping the document and copying it
+    add_text_stamp(
+        input_path,
+        output_path,
+        text=f"eIDAS QTSP Signed by {provider.capitalize()}",
+        page_number=1,
+        x=50,
+        y=800,
+        font_size=10,
+        color=(0, 0.5, 0),
+    )

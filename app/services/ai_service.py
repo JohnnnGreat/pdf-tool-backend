@@ -72,7 +72,7 @@ def _require_gemini():
         )
     import google.generativeai as genai
     genai.configure(api_key=settings.GEMINI_API_KEY)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel(settings.GEMINI_MODEL)
 
 
 def _require_groq():
@@ -198,7 +198,7 @@ class AIService:
 
         try:
             stream = client.chat.completions.create(
-                model="llama-3.1-70b-versatile",
+                model=settings.GROQ_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=4096,

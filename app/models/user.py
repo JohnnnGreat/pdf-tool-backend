@@ -37,3 +37,5 @@ class User(Base):
 
     api_keys = relationship("APIKey",        back_populates="user", cascade="all, delete-orphan", lazy="select")
     jobs     = relationship("ProcessingJob", back_populates="user", cascade="all, delete-orphan", lazy="select")
+    workflows = relationship("Workflow", back_populates="user", cascade="all, delete-orphan", lazy="select")
+    workflow_runs = relationship("WorkflowRun", back_populates="user", cascade="all, delete-orphan", lazy="select")

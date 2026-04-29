@@ -128,6 +128,54 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.get("/me/plan")
+def get_my_plan(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the current user's active plan, usage this month, and days until reset."""
+    from datetime import datetime, timezone
+    from app.repositories.api_key_repository import APIKeyRepository
+    from app.schemas.api_key import TIER_LIMITS, TIER_ORDER
+    from app.services.billing_service import PLAN_META
+
+    # Resolve highest active tier
+    keys   = APIKeyRepository(db).get_by_user(current_user.id)
+    active = [k for k in keys if k.is_active]
+    tier   = "free"
+    if active:
+        tier = max(
+            active,
+            key=lambda k: TIER_ORDER.index(k.tier) if k.tier in TIER_ORDER else 0,
+        ).tier
+
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    meta   = PLAN_META.get(tier, PLAN_META["free"])
+
+    # Next calendar-month reset date
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        next_reset = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        next_reset = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+
+    days_until_reset = max((next_reset - now).days, 0)
+
+    return {
+        "tier":             tier,
+        "plan_name":        meta["name"],
+        "price_monthly":    limits["price_monthly"],
+        "price_yearly":     limits["price_yearly"],
+        "monthly_used":     current_user.monthly_operations,
+        "monthly_limit":    limits["monthly"],
+        "per_minute_limit": limits["per_minute"],
+        "days_until_reset": days_until_reset,
+        "reset_date":       next_reset.strftime("%b %d, %Y"),
+        "features":         meta["features"],
+        "member_since":     current_user.created_at.strftime("%b %Y"),
+    }
+
+
 @router.put("/me", response_model=UserResponse)
 def update_me(
     data: UserUpdateProfile,
@@ -157,7 +205,35 @@ def delete_account(
 ):
     """Permanently delete the current user's account."""
     logger.info("Account deleted for user id=%s email=%s", current_user.id, current_user.email)
+    
+    from app.services.audit_service import AuditService
+    AuditService(db).log(current_user.id, "delete_account", details={"email": current_user.email})
+    
     AuthService(db).delete_account(current_user)
+
+@router.get("/me/export")
+def export_data(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Export all personal data as JSON (GDPR Right to Data Portability)."""
+    data = {
+        "profile": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "username": current_user.username,
+            "full_name": current_user.full_name,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "totp_enabled": current_user.totp_enabled,
+        },
+        "api_keys": [{"id": k.id, "name": k.name, "created_at": k.created_at.isoformat() if k.created_at else None} for k in current_user.api_keys],
+        "jobs": [{"id": j.id, "status": j.status, "tool_name": j.tool_name, "created_at": j.created_at.isoformat() if j.created_at else None} for j in current_user.jobs],
+    }
+    from app.services.audit_service import AuditService
+    AuditService(db).log(current_user.id, "export_data", details={"action": "GDPR data export"})
+    
+    return data
 
 
 # ------------------------------------------------------------------ #

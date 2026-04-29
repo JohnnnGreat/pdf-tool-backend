@@ -51,3 +51,11 @@ alembic==1.14.0
 
 # Structured logging
 python-json-logger==3.3.0
+
+# AI providers
+google-generativeai>=0.8.0
+groq>=0.11.0
+
+# Conversion quality
+pdfplumber>=0.11.0      # best-in-class PDF table extraction
+xhtml2pdf>=0.2.16       # pure-Python HTML → PDF (better than LibreOffice for HTML)
