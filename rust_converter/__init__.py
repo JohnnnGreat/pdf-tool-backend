@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from importlib.machinery import EXTENSION_SUFFIXES
+from pathlib import Path
 from typing import Final
 
 __all__ = [
@@ -36,14 +40,36 @@ class RustModuleNotBuiltError(RustConversionError):
 
 _IMPORT_ERROR: Exception | None = None
 
+
+def _load_native_module():
+    package_dir = Path(__file__).resolve().parent
+
+    for search_root in [package_dir, *(Path(path) / "rust_converter" for path in sys.path if path)]:
+        if not search_root.is_dir():
+            continue
+
+        for suffix in EXTENSION_SUFFIXES:
+            candidate = search_root / f"_rust_converter{suffix}"
+            if not candidate.is_file():
+                continue
+
+            spec = importlib.util.spec_from_file_location("rust_converter._rust_converter", candidate)
+            if spec is None or spec.loader is None:
+                continue
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+    raise ModuleNotFoundError("No module named 'rust_converter._rust_converter'")
+
 try:
-    from ._rust_converter import (  # type: ignore[attr-defined]
-        DocxGenerationError,
-        InvalidPdfError,
-        RustConversionError,
-        UnsupportedScannedPdfError,
-        convert_pdf_to_docx as _native_convert_pdf_to_docx,
-    )
+    _native_module = _load_native_module()
+    DocxGenerationError = _native_module.DocxGenerationError
+    InvalidPdfError = _native_module.InvalidPdfError
+    RustConversionError = _native_module.RustConversionError
+    UnsupportedScannedPdfError = _native_module.UnsupportedScannedPdfError
+    _native_convert_pdf_to_docx = _native_module.convert_pdf_to_docx
 
     AVAILABLE: Final[bool] = True
 except Exception as exc:  # pragma: no cover - exercised when native module is absent.

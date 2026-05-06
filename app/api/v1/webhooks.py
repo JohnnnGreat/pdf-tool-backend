@@ -109,53 +109,11 @@ def _upgrade(db: Session, email: str, tier: str, provider: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Paystack
+# Paystack — suspended, Flutterwave only
 # ---------------------------------------------------------------------------
 
-@router.post("/paystack", status_code=status.HTTP_200_OK)
-async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
-    """Handles Paystack charge.success and invoice.payment_success events.
-
-    Set in Paystack Dashboard → Settings → API Keys & Webhooks.
-    Add metadata key **tier** (value: pro | enterprise) to each plan.
-    """
-    body = await _raw_body(request)
-
-    # 1. Verify signature
-    if not settings.PAYSTACK_SECRET_KEY:
-        raise HTTPException(status_code=500, detail="PAYSTACK_SECRET_KEY not configured")
-
-    expected = _hmac_sha512(settings.PAYSTACK_SECRET_KEY, body)
-    received = request.headers.get("x-paystack-signature", "")
-    if not hmac.compare_digest(expected, received):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Paystack signature")
-
-    # 2. Parse
-    try:
-        payload = json.loads(body)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    event = payload.get("event", "")
-    if event not in ("charge.success", "invoice.payment_success"):
-        return {"status": "ignored", "event": event}
-
-    data = payload.get("data", {})
-    if data.get("status") not in ("success", "paid"):
-        return {"status": "ignored", "reason": "payment not successful"}
-
-    # 3. Extract email + tier
-    email: str = (
-        data.get("customer", {}).get("email", "")
-        or data.get("metadata", {}).get("email", "")
-    )
-    tier: str = (
-        data.get("metadata", {}).get("tier", "")          # preferred
-        or data.get("plan", {}).get("name", "")           # fallback: plan name
-        or data.get("plan_object", {}).get("name", "")
-    )
-
-    return _upgrade(db, email, tier, "paystack")
+# @router.post("/paystack", ...)
+# async def paystack_webhook(...): ...
 
 
 # ---------------------------------------------------------------------------
@@ -213,99 +171,16 @@ async def flutterwave_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# Lemon Squeezy
+# Lemon Squeezy — suspended
 # ---------------------------------------------------------------------------
 
-@router.post("/lemonsqueezy", status_code=status.HTTP_200_OK)
-async def lemonsqueezy_webhook(request: Request, db: Session = Depends(get_db)):
-    """Handles Lemon Squeezy order_created / subscription_created / subscription_updated.
-
-    Set in LS Dashboard → Settings → Webhooks.
-    Pass user email + tier as Custom Data on your checkout URL:
-      ?checkout[custom][user_email]=user@example.com&checkout[custom][tier]=pro
-    """
-    body = await _raw_body(request)
-
-    # 1. Verify signature
-    if not settings.LEMONSQUEEZY_WEBHOOK_SECRET:
-        raise HTTPException(status_code=500, detail="LEMONSQUEEZY_WEBHOOK_SECRET not configured")
-
-    expected = _hmac_sha256(settings.LEMONSQUEEZY_WEBHOOK_SECRET, body)
-    received = request.headers.get("X-Signature", "")
-    if not hmac.compare_digest(expected, received):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Lemon Squeezy signature")
-
-    # 2. Parse
-    try:
-        payload = json.loads(body)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    event = payload.get("meta", {}).get("event_name", "")
-    if event not in ("order_created", "subscription_created", "subscription_updated"):
-        return {"status": "ignored", "event": event}
-
-    # 3. Extract email + tier from custom_data or attributes
-    custom: dict = payload.get("meta", {}).get("custom_data", {}) or {}
-    attrs: dict = payload.get("data", {}).get("attributes", {}) or {}
-
-    email: str = (
-        custom.get("user_email", "")
-        or attrs.get("user_email", "")
-        or attrs.get("user_name", "")   # LS sometimes uses user_name for email
-    )
-    tier: str = (
-        custom.get("tier", "")
-        or attrs.get("variant_name", "")   # fallback: variant name e.g. "Pro Plan"
-        or attrs.get("product_name", "")
-    )
-
-    return _upgrade(db, email, tier, "lemonsqueezy")
+# @router.post("/lemonsqueezy", ...)
+# async def lemonsqueezy_webhook(...): ...
 
 
 # ---------------------------------------------------------------------------
-# Coinbase Commerce  (crypto)
+# Coinbase Commerce — suspended
 # ---------------------------------------------------------------------------
 
-@router.post("/coinbase", status_code=status.HTTP_200_OK)
-async def coinbase_webhook(request: Request, db: Session = Depends(get_db)):
-    """Handles Coinbase Commerce charge:confirmed events (crypto payments).
-
-    Accepts BTC, ETH, USDC, USDT, DAI, LTC and any coin Coinbase Commerce supports.
-    Set in Coinbase Commerce Dashboard → Settings → Webhook subscriptions.
-
-    When creating a charge, pass metadata:
-      { "email": "user@example.com", "tier": "pro" }
-    """
-    body = await _raw_body(request)
-
-    # 1. Verify signature
-    if not settings.COINBASE_WEBHOOK_SECRET:
-        raise HTTPException(status_code=500, detail="COINBASE_WEBHOOK_SECRET not configured")
-
-    expected = _hmac_sha256(settings.COINBASE_WEBHOOK_SECRET, body)
-    received = request.headers.get("X-CC-Webhook-Signature", "")
-    if not hmac.compare_digest(expected, received):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Coinbase signature")
-
-    # 2. Parse
-    try:
-        payload = json.loads(body)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    event_type: str = payload.get("event", {}).get("type", "")
-    if event_type != "charge:confirmed":
-        return {"status": "ignored", "event": event_type}
-
-    # 3. Extract email + tier from charge metadata
-    charge_data: dict = payload.get("event", {}).get("data", {})
-    metadata: dict = charge_data.get("metadata", {}) or {}
-
-    email: str = metadata.get("email", "")
-    tier: str = (
-        metadata.get("tier", "")
-        or charge_data.get("name", "")   # fallback: charge name e.g. "DocForge Pro"
-    )
-
-    return _upgrade(db, email, tier, "coinbase")
+# @router.post("/coinbase", ...)
+# async def coinbase_webhook(...): ...

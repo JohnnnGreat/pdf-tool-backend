@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(venv/Scripts/python -c \"import bcrypt; print\\(bcrypt.__version__\\)\")"
+      "Bash(venv/Scripts/python -c \"import bcrypt; print\\(bcrypt.__version__\\)\")",
+      "Bash(git -C \"c:/Users/user/John/pdf-tool-backend\" status --short)",
+      "Bash(git -C \"c:/Users/user/John/pdf-tool-backend\" rm -r --cached .cargo-home/)",
+      "Bash(git -C \"c:/Users/user/John/pdf-tool-backend\" rm -r --cached results/)",
+      "Bash(git -C \"c:/Users/user/John/pdf-tool-backend\" rm --cached \"SHORT POST.pdf\")"
     ]
   }
 }

@@ -39,3 +39,17 @@ outputs/*
 
 # Nginx logs (mounted as volume)
 nginx/logs/
+
+# Rust / Cargo cache (downloaded by Docker build, not source code)
+.cargo-home/
+cargo-home/
+
+# Processed file results (runtime output, not source code)
+results/
+
+# Test/sample files
+*.pdf
+*.docx
+*.doc
+*.xlsx
+*.pptx

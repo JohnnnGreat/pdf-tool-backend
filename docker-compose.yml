@@ -28,10 +28,7 @@ services:
       # Keep uploads/outputs as named volumes so they persist across restarts
       - uploads_data:/app/uploads
       - outputs_data:/app/outputs
-      # Keep Rust/PDFium build caches inside Linux volumes, not the Windows bind mount
-      - cargo_registry_data:/root/.cargo/registry
-      - cargo_git_data:/root/.cargo/git
-      - rust_target_data:/tmp/rust-target
+      # Keep PDFium cache inside a Linux volume, not the Windows bind mount
       - pdfium_cache_data:/tmp/pdfium-cache
     ports:
       - "8000:8000"
@@ -47,7 +44,6 @@ services:
       # Storage directories inside the container
       UPLOAD_DIR: /app/uploads
       OUTPUT_DIR: /app/outputs
-      CARGO_TARGET_DIR: /tmp/rust-target
       PDFIUM_AUTO_CACHE_DIR: /tmp/pdfium-cache
       DEBUG: "true"
     depends_on:
@@ -98,7 +94,4 @@ volumes:
   redis_data:
   uploads_data:
   outputs_data:
-  cargo_registry_data:
-  cargo_git_data:
-  rust_target_data:
   pdfium_cache_data:

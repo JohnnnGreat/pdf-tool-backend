@@ -163,80 +163,13 @@ class BillingService:
         )
 
     # ------------------------------------------------------------------ #
-    #  Checkout — Paystack                                                 #
+    #  Checkout — Paystack (suspended — Flutterwave only)                  #
     # ------------------------------------------------------------------ #
 
-    def _paystack_checkout(
-        self, user: User, tier: str, period: BillingPeriod
-    ) -> CheckoutResponse:
-        if not settings.PAYSTACK_SECRET_KEY:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Paystack is not configured. Set PAYSTACK_SECRET_KEY in .env.",
-            )
-
-        limits     = TIER_LIMITS[tier]
-        price_usd  = limits["price_yearly"] if period == "yearly" else limits["price_monthly"]
-        amount_kobo = price_usd * 100          # Paystack uses kobo/cents * 100
-
-        reference = f"docforge_{uuid.uuid4().hex[:16]}"
-
-        payload = {
-            "email": user.email,
-            "amount": amount_kobo,
-            "currency": "USD",
-            "reference": reference,
-            "callback_url": settings.PAYMENT_CALLBACK_URL,
-            "metadata": {
-                "tier": tier,
-                "period": period,
-                "user_id": user.id,
-                "cancel_action": f"{settings.PAYMENT_CALLBACK_URL}?status=cancelled",
-            },
-        }
-
-        try:
-            resp = httpx.post(
-                "https://api.paystack.co/transaction/initialize",
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}",
-                    "Content-Type": "application/json",
-                },
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()["data"]
-        except httpx.HTTPStatusError as exc:
-            message = None
-            next_step = None
-            try:
-                body = exc.response.json()
-                message = body.get("message")
-                meta = body.get("meta") or {}
-                next_step = meta.get("next_step") or meta.get("nextStep")
-            except ValueError:
-                pass
-            detail = f"Paystack error ({exc.response.status_code})"
-            if message:
-                detail += f": {message}"
-            if next_step:
-                detail += f" Next step: {next_step}"
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
-        except httpx.HTTPError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Paystack error: {exc}",
-            )
-
-        return CheckoutResponse(
-            provider="paystack",
-            tier=tier,
-            period=period,
-            amount_usd=price_usd,
-            authorization_url=data["authorization_url"],
-            reference=data["reference"],
-        )
+    # def _paystack_checkout(
+    #     self, user: User, tier: str, period: BillingPeriod
+    # ) -> CheckoutResponse:
+    #     ...
 
     # ------------------------------------------------------------------ #
     #  Checkout — Flutterwave                                              #
@@ -300,67 +233,16 @@ class BillingService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid tier for checkout.",
             )
-        if data.provider == "flutterwave":
-            return self._flutterwave_checkout(user, data.tier, data.period)
-        return self._paystack_checkout(user, data.tier, data.period)
+        return self._flutterwave_checkout(user, data.tier, data.period)
 
     # ------------------------------------------------------------------ #
     #  Verify payment                                                      #
     # ------------------------------------------------------------------ #
 
     def verify_payment(self, user: User, data: VerifyRequest) -> VerifyResponse:
-        if data.provider == "flutterwave":
-            return self._verify_flutterwave(user, data.reference)
-        return self._verify_paystack(user, data.reference)
+        return self._verify_flutterwave(user, data.reference)
 
-    def _verify_paystack(self, user: User, reference: str) -> VerifyResponse:
-        if not settings.PAYSTACK_SECRET_KEY:
-            raise HTTPException(status_code=503, detail="Paystack not configured.")
-        try:
-            resp = httpx.get(
-                f"https://api.paystack.co/transaction/verify/{reference}",
-                headers={"Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}"},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-        except httpx.HTTPStatusError as exc:
-            message = None
-            next_step = None
-            try:
-                body = exc.response.json()
-                message = body.get("message")
-                meta = body.get("meta") or {}
-                next_step = meta.get("next_step") or meta.get("nextStep")
-            except ValueError:
-                pass
-            detail = f"Paystack verification error ({exc.response.status_code})"
-            if message:
-                detail += f": {message}"
-            if next_step:
-                detail += f" Next step: {next_step}"
-            raise HTTPException(status_code=502, detail=detail)
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"Paystack verification error: {exc}")
-
-        tx     = body.get("data", {})
-        ps     = tx.get("status", "")
-        meta   = tx.get("metadata", {}) or {}
-        tier   = meta.get("tier", "pro")
-        period = meta.get("period", "monthly")
-        amount = (tx.get("amount", 0) or 0) // 100
-
-        if ps == "success":
-            self.upgrade(user, tier, period)
-            return VerifyResponse(
-                status="success", tier=tier, period=period,
-                amount_usd=amount, message=f"Payment confirmed. You are now on {PLAN_META[tier]['name']}.",
-            )
-
-        return VerifyResponse(
-            status=ps, tier=tier, period=period, amount_usd=amount,
-            message="Payment not yet confirmed." if ps == "pending" else "Payment failed.",
-        )
+    # def _verify_paystack — suspended, Flutterwave only
 
     def _verify_flutterwave(self, user: User, reference: str) -> VerifyResponse:
         if not settings.FLUTTERWAVE_SECRET_KEY:

@@ -7,14 +7,6 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.core.config import settings
-from rust_converter import (
-    DocxGenerationError as RustDocxGenerationError,
-    InvalidPdfError as RustInvalidPdfError,
-    RustConversionError,
-    RustModuleNotBuiltError,
-    UnsupportedScannedPdfError as RustUnsupportedScannedPdfError,
-    convert_pdf_to_docx as rust_convert_pdf_to_docx,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -530,51 +522,12 @@ def _legacy_pdf_to_word(input_path: str, output_path: str) -> None:
 
 def pdf_to_word(input_path: str, output_path: str) -> None:
     """
-    Convert a PDF to DOCX using the custom Rust visual replica engine.
+    Convert a PDF to an editable DOCX.
 
-    The Rust module extracts page sizes and text layout, renders each page
-    to a background image for fidelity, then writes a DOCX with absolutely
-    positioned text boxes over the rendered page image.
+    Uses the cascading Python engine (pdf2docx → PyMuPDF+python-docx → LibreOffice)
+    which produces far better layout fidelity than a hand-rolled Rust extractor.
     """
-    if os.path.exists(output_path):
-        os.remove(output_path)
-
-    try:
-        success = rust_convert_pdf_to_docx(input_path, output_path)
-    except RustModuleNotBuiltError as exc:
-        logger.exception("Rust PDF-to-DOCX module is unavailable: %s", exc)
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Rust PDF-to-DOCX converter is not installed. "
-                "Build it with `maturin develop --release` from the backend root."
-            ),
-        ) from exc
-    except RustInvalidPdfError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RustUnsupportedScannedPdfError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except (RustDocxGenerationError, RustConversionError) as exc:
-        logger.warning("Rust PDF-to-DOCX conversion failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive boundary
-        logger.exception("Unexpected Rust PDF-to-DOCX failure: %s", exc)
-        raise HTTPException(
-            status_code=500,
-            detail="PDF to Word conversion failed inside the Rust converter.",
-        ) from exc
-
-    if not success:
-        raise HTTPException(
-            status_code=500,
-            detail="Rust PDF-to-DOCX converter returned an unsuccessful result.",
-        )
-
-    if not os.path.exists(output_path):
-        raise HTTPException(
-            status_code=500,
-            detail="Rust PDF-to-DOCX converter did not create an output file.",
-        )
+    _legacy_pdf_to_word(input_path, output_path)
 
 
 def pdf_to_excel(input_path: str, output_path: str) -> None:

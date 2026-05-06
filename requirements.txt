@@ -18,7 +18,7 @@ pdf2docx>=0.5.12
 
 # Image Processing
 Pillow>=12.1.0
-rembg>=2.0.74
+rembg[cpu]>=2.0.74
 
 # OCR
 pytesseract==0.3.13
@@ -41,8 +41,6 @@ pyotp>=2.9.0
 pytest==8.3.5
 httpx==0.28.1
 pytest-asyncio==0.25.3
-maturin>=1.13.0
-
 # Conversion Extras
 # Using LibreOffice for most conversions to avoid system DLL issues on Windows
 markdown>=3.7

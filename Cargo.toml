@@ -10,10 +10,7 @@ name = "_rust_converter"
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1.0.100"
-image = { version = "0.25.6", default-features = false, features = ["png"] }
-pdfium-auto = "0.3.0"
-pdfium-render = { version = "0.8.37", default-features = true }
+pdf_oxide = { version = "0.3.39", features = ["rendering"] }
 pyo3 = { version = "0.28.2", features = ["extension-module"] }
+rdocx = "0.1.2"
 thiserror = "2.0.11"
-zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
