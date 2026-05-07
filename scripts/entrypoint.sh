@@ -4,13 +4,14 @@ set -e
 
 echo "==> [entrypoint] Waiting for PostgreSQL to be ready..."
 
-# Extract host and port from DATABASE_URL
-# Expected format: postgresql://user:pass@host:port/dbname
-DB_HOST=$(echo "$DATABASE_URL" | sed -e 's|.*@||' -e 's|:.*||' -e 's|/.*||')
-DB_PORT=$(echo "$DATABASE_URL" | sed -e 's|.*:||' -e 's|/.*||')
-DB_PORT=${DB_PORT:-5432}
-
-until pg_isready -h "$DB_HOST" -p "$DB_PORT" -q; do
+until python -c "
+import psycopg2, os, sys
+try:
+    psycopg2.connect(os.environ['DATABASE_URL'], connect_timeout=3)
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; do
     echo "==> [entrypoint] PostgreSQL is not ready yet — retrying in 2s..."
     sleep 2
 done
